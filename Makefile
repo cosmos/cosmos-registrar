@@ -9,7 +9,7 @@ all: install
 
 LD_FLAGS = -X github.com/jackzampolin/cosmos-registrar/cmd.Version=$(VERSION) \
 	-X github.com/jackzampolin/cosmos-registrar/cmd.Commit=$(COMMIT) \
-	-X github.com/jackzampolin/cosmos-registrar/cmd.TMVersion=$(SDKCOMMIT) 
+	-X github.com/jackzampolin/cosmos-registrar/cmd.TMVersion=$(TMVERSION) 
 
 BUILD_FLAGS := -ldflags '$(LD_FLAGS)'
 

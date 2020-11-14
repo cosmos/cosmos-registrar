@@ -33,7 +33,3 @@ registrar update
 ```
 
 See https://github.com/jackzampolin/registry for example output
-
-### Next Steps:
-- [ ] Goreleaser integration
-- [ ] release this
