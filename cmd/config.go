@@ -23,7 +23,9 @@ func initConfig(cmd *cobra.Command) (err error) {
 		if err = yaml.Unmarshal(file, config); err != nil {
 			return fmt.Errorf("Error unmarshalling config: %s", err)
 		}
+		return nil
 	}
+	fmt.Println("no config file", cfgFile)
 	return nil
 }
 
@@ -40,6 +42,7 @@ type Config struct {
 	RegistryRepoBranch string `json:"registry-repo-branch" yaml:"registry-repo-branch"`
 	GitName            string `json:"git-name" yaml:"git-name"`
 	GitEmail           string `json:"git-email" yaml:"git-email"`
+	CommitMessage      string `json:"commit-message" yaml:"commit-message"`
 }
 
 // Binary returns the binary file representation from the config
@@ -96,6 +99,7 @@ func defaultConfig() []byte {
 		RegistryRepoBranch: "main",
 		GitName:            "Your name goes here",
 		GitEmail:           "your@email.here",
+		CommitMessage:      "update roots of trust",
 	}
 	config = c
 	return c.MustYAML()
@@ -229,6 +233,10 @@ func configEditCmd() *cobra.Command {
 			case "git-email":
 				// TODO: validate
 				config.GitEmail = args[1]
+				return overwriteConfig(cmd, config)
+			case "commit-message":
+				// TODO: validate
+				config.CommitMessage = args[1]
 				return overwriteConfig(cmd, config)
 			default:
 				return fmt.Errorf("key(%s) is not in the config file or is not editable via this command", args[0])

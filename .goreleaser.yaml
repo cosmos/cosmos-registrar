@@ -1,0 +1,26 @@
+project_name: Cosmos Registrar
+
+env:
+  # Require use of Go modules.
+  - GO111MODULE=on
+
+builds:
+  - id: "registrar"
+    main: ./main.go
+    ldflags:
+      - -X github.com/jackzampolin/cosmos-registrar/cmd.Version={{ .Tag }}
+      - -X github.com/jackzampolin/cosmos-registrar/cmd.Commit={{ .FullCommit }}
+      - -X github.com/jackzampolin/cosmos-registrar/cmd.TMCOMMIT={{ .Env.TMCOMMIT }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+checksum:
+  name_template: SHA256SUMS-{{.Version}}.txt
+  algorithm: sha256
+
+release:
+  name_template: "{{ .Version }} - Registrar Release"

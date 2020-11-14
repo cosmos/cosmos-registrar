@@ -42,26 +42,22 @@ func init() {
 	rootCmd.AddCommand(
 		configCmd(),
 		updateCmd,
+		getVersionCmd(),
 	)
 }
 
-// rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "registrar",
-	Short: "registers data about a chain's peers seeds etc... in github repo",
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Short: "registers data aiding in chain service discovery (peers seeds etc...) in github repo",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
+	// reads `.registrar.yaml` into `var config *Config` before each command
 	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
-		// reads `homeDir/config/config.yaml` into `var config *Config` before each command
 		return initConfig(rootCmd)
 	}
-
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
