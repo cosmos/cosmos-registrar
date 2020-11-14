@@ -230,17 +230,6 @@ var updateCmd = &cobra.Command{
 			return err
 		}
 
-		// add all changes in the directory
-		// toAdd := []string{
-		// 	heightPath,
-		// 	chainPath,
-		// 	genesisPath,
-		// 	genesisSumPath,
-		// 	lightRootPath,
-		// 	latestPath,
-		// 	binariesPath,
-		// }
-
 		st, err := worktree.Status()
 		if err != nil {
 			return err
@@ -251,20 +240,6 @@ var updateCmd = &cobra.Command{
 				return err
 			}
 		}
-
-		// // for _, f := range toAdd {
-		// if _, err = worktree.Add(chainPath); err != nil {
-		// 	fmt.Println("in add error", err)
-		// 	files, err := ioutil.ReadDir(chainPath)
-		// 	if err != nil {
-		// 		log.Fatal(err)
-		// 	}
-		// 	for _, f := range files {
-		// 		fmt.Println(f.Name())
-		// 	}
-		// 	return err
-		// }
-		// }
 
 		// commit those changes
 		commitMsg := fmt.Sprintf("Push master: bot update %s at %s", config.ChainID, time.Now())
