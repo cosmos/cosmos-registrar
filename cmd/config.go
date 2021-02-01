@@ -1,20 +1,19 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 
+	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
 	"github.com/spf13/cobra"
-	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
-	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
+
 	"gopkg.in/yaml.v2"
 )
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig(cmd *cobra.Command) (err error) {
-	config = &Config{}
+	config = &registrar.Config{}
 	if _, err = os.Stat(cfgFile); err == nil {
 		file, err := ioutil.ReadFile(cfgFile)
 		if err != nil {
@@ -29,65 +28,8 @@ func initConfig(cmd *cobra.Command) (err error) {
 	return nil
 }
 
-// Config represents the configuration for the given application
-type Config struct {
-	RPCAddr            string `json:"rpc-addr" yaml:"rpc-addr"`
-	ChainID            string `json:"chain-id" yaml:"chain-id"`
-	BuildRepo          string `json:"build-repo" yaml:"build-repo"`
-	BuildCommand       string `json:"build-command" yaml:"build-command"`
-	BinaryName         string `json:"binary-name" yaml:"binary-name"`
-	BuildVersion       string `json:"build-version" yaml:"build-version"`
-	GithubAccessToken  string `json:"github-access-token" yaml:"github-access-token"`
-	RegistryRepo       string `json:"registry-repo" yaml:"registry-repo"`
-	RegistryRepoBranch string `json:"registry-repo-branch" yaml:"registry-repo-branch"`
-	GitName            string `json:"git-name" yaml:"git-name"`
-	GitEmail           string `json:"git-email" yaml:"git-email"`
-	CommitMessage      string `json:"commit-message" yaml:"commit-message"`
-}
-
-// Binary returns the binary file representation from the config
-func (c *Config) Binary() []byte {
-	// TODO: ensure this is sorted?
-	out, _ := json.MarshalIndent(&Binary{
-		Name:    c.BinaryName,
-		Repo:    c.BuildRepo,
-		Build:   c.BuildCommand,
-		Version: c.BuildVersion,
-	}, "", "  ")
-	return out
-}
-
-// Client returns a tendermint client to work against the configured chain
-func (c *Config) Client() (*rpchttp.HTTP, error) {
-	httpClient, err := libclient.DefaultHTTPClient(c.RPCAddr)
-	if err != nil {
-		return nil, err
-	}
-
-	rpcClient, err := rpchttp.NewWithClient(c.RPCAddr, "/websocket", httpClient)
-	if err != nil {
-		return nil, err
-	}
-
-	return rpcClient, nil
-}
-
-// YAML converts the config into yaml bytes
-func (c *Config) YAML() ([]byte, error) {
-	return yaml.Marshal(c)
-}
-
-// MustYAML converts to yaml bytes panicing on error
-func (c *Config) MustYAML() []byte {
-	out, err := c.YAML()
-	if err != nil {
-		panic(err)
-	}
-	return out
-}
-
 func defaultConfig() []byte {
-	c := &Config{
+	c := &registrar.Config{
 		RPCAddr:            "http://localhost:26657",
 		ChainID:            "cosmoshub-3",
 		BuildRepo:          "https://github.com/cosmos/gaia",
@@ -95,11 +37,13 @@ func defaultConfig() []byte {
 		BuildCommand:       "make install",
 		BuildVersion:       "v2.0.13",
 		GithubAccessToken:  "get yours at https://github.com/settings/tokens",
+		RegistryRoot:       "https://github.com/cosmos/registry",
 		RegistryRepo:       "https://github.com/jackzampolin/registry",
 		RegistryRepoBranch: "main",
 		GitName:            "Your name goes here",
 		GitEmail:           "your@email.here",
 		CommitMessage:      "update roots of trust",
+		Workspace:          "/tmp",
 	}
 	config = c
 	return c.MustYAML()
@@ -246,7 +190,7 @@ func configEditCmd() *cobra.Command {
 	return cmd
 }
 
-func overwriteConfig(cmd *cobra.Command, cfg *Config) (err error) {
+func overwriteConfig(cmd *cobra.Command, cfg *registrar.Config) (err error) {
 	if _, err = os.Stat(cfgFile); err == nil {
 		out, err := yaml.Marshal(cfg)
 		if err != nil {

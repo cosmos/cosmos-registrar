@@ -21,12 +21,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
 	"github.com/spf13/viper"
 )
 
 var (
 	cfgFile    string
-	config     *Config
+	config     *registrar.Config
 	cfgFlag    = "config"
 	defaultCfg = os.ExpandEnv("$HOME/.registrar.yaml")
 )
