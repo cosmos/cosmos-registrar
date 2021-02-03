@@ -24,22 +24,41 @@ var (
 	eg      errgroup.Group
 )
 
-// DumpInfo connect to ad node and dumps the info about
-// that chain into a folder
-func DumpInfo(base, chainID string, config *registrar.Config, logger log.Logger) (err error) {
+// FetchChainID - retrieve the chain ID from a rpc endpoint
+func FetchChainID(config *registrar.Config) (chainID string, err error) {
 	client, err := config.Client()
 	if err != nil {
-		return fmt.Errorf("error creating tendermint client: %s", err)
+		err = fmt.Errorf("error creating tendermint client: %s", err)
+		return
 	}
+	stat, err := client.Status()
+	if err != nil {
+		err = fmt.Errorf("error fetching client status: %s", err)
+		return
+	}
+	chainID = stat.NodeInfo.Network
+	return
+}
 
+// DumpInfo connect to ad node and dumps the info about
+// that chain into a folder
+func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Logger) (err error) {
+	client, err := config.Client()
+	if err != nil {
+		err = fmt.Errorf("error creating tendermint client: %s", err)
+		return
+	}
 	stat, err := client.Status()
 	switch {
 	case err != nil:
-		return fmt.Errorf("error fetching client status: %s", err)
+		err = fmt.Errorf("error fetching client status: %s", err)
+		return
 	case stat.NodeInfo.Network != chainID:
-		return fmt.Errorf("node(%s) is on chain(%s) not configured chain(%s)", config.RPCAddr, stat.NodeInfo.Network, chainID)
+		err = fmt.Errorf("node(%s) is on chain(%s) not configured chain(%s)", config.RPCAddr, stat.NodeInfo.Network, chainID)
+		return
 	case stat.SyncInfo.CatchingUp:
-		return fmt.Errorf("node(%s) on chain(%s) still catching up", config.RPCAddr, chainID)
+		err = fmt.Errorf("node(%s) on chain(%s) still catching up", config.RPCAddr, chainID)
+		return
 	default:
 		logger.Info("GET /status", "rpc-addr", config.RPCAddr)
 	}
@@ -76,10 +95,11 @@ func DumpInfo(base, chainID string, config *registrar.Config, logger log.Logger)
 	})
 
 	if err = eg.Wait(); err != nil {
-		return fmt.Errorf("fetching: %s", err)
+		err = fmt.Errorf("fetching: %s", err)
+		return
 	}
 	// fetch data
-	rdir := repoDir{base, chainID}
+	rdir := repoDir{basePath, chainID}
 	if err = createDirIfNotExist(rdir.chainPath(), logger); err != nil {
 		return
 	}
@@ -142,9 +162,7 @@ func DumpInfo(base, chainID string, config *registrar.Config, logger log.Logger)
 		return updateFile(rdir.peersPath(), w, logger)
 	})
 
-	if err = eg.Wait(); err != nil {
-		return err
-	}
+	err = eg.Wait()
 	return
 }
 
@@ -153,7 +171,7 @@ type repoDir struct {
 	chainID string
 }
 
-func (r repoDir) chainPath() string         { return path.Join(r.dir, r.chainID) }
+func (r repoDir) chainPath() string         { return path.Join(r.dir) }
 func (r repoDir) genesisPath() string       { return path.Join(r.chainPath(), "genesis.json") }
 func (r repoDir) genesisSumPath() string    { return path.Join(r.chainPath(), "genesis.json.sum") }
 func (r repoDir) lrpath() string            { return path.Join(r.chainPath(), "light-roots") }
