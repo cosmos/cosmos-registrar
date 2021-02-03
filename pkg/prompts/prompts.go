@@ -3,42 +3,11 @@ package prompts
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
-	"github.com/jackzampolin/cosmos-registrar/pkg/config"
 	"github.com/manifoldco/promptui"
 )
-
-// Setup guides the user to setup their environmant
-func Setup() (config config.Config, err error) {
-	println(`Welcome to the Cosmos registrar tool. 
-	This tool will allow you to publicly claim a name for your 
-	cosmos based chain.`)
-
-	println(`To complete the setup you need a Github account and 
-	network connectivity to a node of your chain.`)
-	// fail if they are not available
-	if goOn := Confirm("do you have them available?", "Y"); !goOn {
-		println("please make sure you get them and the run the setup again")
-		return
-	}
-	// next get the github user
-	config.GitName, err = InputRequired("enter your github name")
-	if err != nil {
-		println(err.Error())
-	}
-	// now get the github token
-	println(`the next step is to enter a github personal token, 
-if you don't have one you can get it from 
-https://github.com/settings/tokens
-make sure that you select the permission repo > public_repo`)
-	config.GithubAccessToken, err = InputRequired("token")
-	// now get the github token
-	println("what is a node rpc address for the chain you want to register (eg. http://10.0.0.1:26657)")
-	config.RPCAddr, err = InputRequired("rpc address: ")
-	println("the setup is completed")
-	return
-}
 
 // Confirm - prompt the user for a yes/no answer
 func Confirm(f, defaultAnswer string, v ...interface{}) bool {
@@ -71,4 +40,14 @@ func input(validator func(v string) error, q string, v ...interface{}) (res stri
 	}
 	res, err = prompt.Run()
 	return
+}
+
+// PrettyMap - pretty print a map
+func PrettyMap(data map[string]interface{}) {
+	var settings sort.StringSlice
+	for k, v := range data {
+		settings = append(settings, fmt.Sprintf("%-22s: %s", k, v))
+	}
+	sort.Sort(settings)
+	println(strings.Join(settings, "\n"))
 }

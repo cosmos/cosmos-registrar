@@ -11,20 +11,21 @@ import (
 
 // Config represents the configuration for the given application
 type Config struct {
-	RPCAddr            string `json:"rpc-addr" yaml:"rpc-addr"`
-	ChainID            string `json:"chain-id" yaml:"chain-id"`
-	BuildRepo          string `json:"build-repo" yaml:"build-repo"`
-	BuildCommand       string `json:"build-command" yaml:"build-command"`
-	BinaryName         string `json:"binary-name" yaml:"binary-name"`
-	BuildVersion       string `json:"build-version" yaml:"build-version"`
-	GithubAccessToken  string `json:"github-access-token" yaml:"github-access-token"`
-	RegistryRoot       string `json:"registry-root" yaml:"registry-root"`
-	RegistryForkName   string `json:"registry-fork-name" yaml:"registry-fork-name"`
-	RegistryRootBranch string `json:"registry-root-branch" yaml:"registry-root-branch"`
-	GitName            string `json:"git-name" yaml:"git-name"`
-	GitEmail           string `json:"git-email" yaml:"git-email"`
-	CommitMessage      string `json:"commit-message" yaml:"commit-message"`
-	Workspace          string `json:"workspace" yaml:"workspace"`
+	RPCAddr            string `json:"rpc-addr" yaml:"rpc-addr" mapstructure:"rpc-addr"`
+	ChainID            string `json:"chain-id" yaml:"chain-id" mapstructure:"chain-id"`
+	BuildRepo          string `json:"build-repo" yaml:"build-repo" mapstructure:"build-repo"`
+	BuildCommand       string `json:"build-command" yaml:"build-command" mapstructure:"build-command"`
+	BinaryName         string `json:"binary-name" yaml:"binary-name" mapstructure:"binary-name"`
+	BuildVersion       string `json:"build-version" yaml:"build-version" mapstructure:"build-version"`
+	GithubAccessToken  string `json:"github-access-token" yaml:"github-access-token" mapstructure:"github-access-token"`
+	RegistryRoot       string `json:"registry-root" yaml:"registry-root" mapstructure:"registry-root"`
+	RegistryForkName   string `json:"registry-fork-name" yaml:"registry-fork-name" mapstructure:"registry-fork-name"`
+	RegistryRootBranch string `json:"registry-root-branch" yaml:"registry-root-branch" mapstructure:"registry-root-branch"`
+	GitName            string `json:"git-name" yaml:"git-name" mapstructure:"git-name"`
+	GitEmail           string `json:"git-email" yaml:"git-email" mapstructure:"git-email"`
+	CommitMessage      string `json:"commit-message" yaml:"commit-message" mapstructure:"commit-message"`
+	// runtime variables
+	Workspace string `json:"-" yaml:"-" mapstructure:"-"`
 }
 
 // Binary returns the binary file representation from the config

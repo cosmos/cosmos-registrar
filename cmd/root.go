@@ -23,25 +23,25 @@ import (
 	"github.com/tendermint/tendermint/libs/log"
 
 	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
-	"github.com/spf13/viper"
 )
 
 var (
-	cfgFile    string
-	config     *registrar.Config
-	cfgFlag    = "config"
-	defaultCfg = os.ExpandEnv("$HOME/.registrar.yaml")
-	logger     = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+	cfgFile       string
+	config        *registrar.Config
+	logger        = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+	noInteraction = false
 )
 
 func init() {
+	cobra.OnInitialize(initConfig)
+
 	cobra.EnableCommandSorting = false
 	rootCmd.SilenceUsage = true
-	rootCmd.PersistentFlags().StringVar(&cfgFile, cfgFlag, defaultCfg, "config file (default is $HOME/.registrar.yaml)")
-	if err := viper.BindPFlag(cfgFlag, rootCmd.Flags().Lookup(cfgFlag)); err != nil {
-		panic(err)
-	}
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file")
+
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.Flags().BoolVarP(&noInteraction, "no-interactive", "y", false, "Run commands non interactively")
+
 	rootCmd.AddCommand(
 		configCmd(),
 		updateCmd,
@@ -52,16 +52,17 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "registrar",
 	Short: "registers data aiding in chain service discovery (peers seeds etc...) in github repo",
+	Run:   interact,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	// reads `.registrar.yaml` into `var config *Config` before each command
-	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
-		return initConfig(rootCmd)
-	}
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func interact(cmd *cobra.Command, args []string) {
+	println("welcome")
 }
