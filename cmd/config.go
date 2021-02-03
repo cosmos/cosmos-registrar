@@ -38,8 +38,8 @@ func defaultConfig() []byte {
 		BuildVersion:       "v2.0.13",
 		GithubAccessToken:  "get yours at https://github.com/settings/tokens",
 		RegistryRoot:       "https://github.com/cosmos/registry",
-		RegistryRepo:       "https://github.com/jackzampolin/registry",
-		RegistryRepoBranch: "main",
+		RegistryForkName:   "cosmos-registry",
+		RegistryRootBranch: "main",
 		GitName:            "Your name goes here",
 		GitEmail:           "your@email.here",
 		CommitMessage:      "update roots of trust",
@@ -162,13 +162,13 @@ func configEditCmd() *cobra.Command {
 				// TODO: validate
 				config.GithubAccessToken = args[1]
 				return overwriteConfig(cmd, config)
-			case "registry-repo":
+			case "registry-fork-name":
 				// TODO: validate
-				config.RegistryRepo = args[1]
+				config.RegistryForkName = args[1]
 				return overwriteConfig(cmd, config)
-			case "registry-repo-branch":
+			case "registry-root-branch":
 				// TODO: validate
-				config.RegistryRepoBranch = args[1]
+				config.RegistryRootBranch = args[1]
 				return overwriteConfig(cmd, config)
 			case "git-name":
 				// TODO: validate

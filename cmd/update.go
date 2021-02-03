@@ -28,7 +28,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/jackzampolin/cosmos-registrar/pkg/node"
 	"github.com/spf13/cobra"
-	"github.com/tendermint/tendermint/libs/log"
 )
 
 // updateCmd represents the update command
@@ -39,16 +38,16 @@ var updateCmd = &cobra.Command{
 		var (
 			repo     *git.Repository
 			worktree *git.Worktree
-			logger   = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+
 			authOpts = &http.BasicAuth{
 				Username: "emptystring",
 				Password: config.GithubAccessToken,
 			}
 			cloneOpts = &git.CloneOptions{
 				Auth:          authOpts,
-				URL:           config.RegistryRepo,
+				URL:           config.RegistryRoot,
 				SingleBranch:  true,
-				ReferenceName: plumbing.NewBranchReferenceName(config.RegistryRepoBranch),
+				ReferenceName: plumbing.NewBranchReferenceName(config.RegistryRootBranch),
 				Progress:      ioutil.Discard,
 			}
 			commitOpts = &git.CommitOptions{
@@ -70,19 +69,24 @@ var updateCmd = &cobra.Command{
 		}
 		defer os.RemoveAll(dir)
 
-		logger.Info("cloning", "registry-repo", config.RegistryRepo, "tmpdir", dir)
+		logger.Info("cloning", "registry-repo", config.RegistryRoot, "tmpdir", dir)
 		if repo, err = git.PlainClone(dir, false, cloneOpts); err != nil {
-			return fmt.Errorf("cloning %s repository: %s", config.RegistryRepo, err)
+			return fmt.Errorf("cloning %s repository: %s", config.RegistryRoot, err)
 		}
 		if worktree, err = repo.Worktree(); err != nil {
 			return fmt.Errorf("creating git working tree: %s", err)
 		}
 
 		// dump node info
-		err = node.DumpInfo(dir, config.ChainID, config, logger)
+		chainID, err := node.FetchChainID(config)
 		if err != nil {
 			return err
 		}
+		err = node.DumpInfo(dir, chainID, config, logger)
+		if err != nil {
+			return err
+		}
+		println("updating ", chainID)
 
 		st, err := worktree.Status()
 		if err != nil {
@@ -97,12 +101,12 @@ var updateCmd = &cobra.Command{
 		msg := fmt.Sprintf("Push master [%s]: %s", config.ChainID, config.CommitMessage)
 		obj, err := worktree.Commit(msg, commitOpts)
 		if err != nil {
-			return fmt.Errorf("commiting changes on %s: %s", config.RegistryRepo, err)
+			return fmt.Errorf("commiting changes on %s: %s", config.RegistryRoot, err)
 		}
 		if err = repo.Push(pushOpts); err != nil {
-			return fmt.Errorf("pushing to %s: %s", config.RegistryRepo, err)
+			return fmt.Errorf("pushing to %s: %s", config.RegistryRoot, err)
 		}
-		logger.Info("commited changes", "repo", config.RegistryRepo, "commit", obj.String(), "message", msg)
+		logger.Info("committed changes", "repo", config.RegistryRoot, "commit", obj.String(), "message", msg)
 		return nil
 	},
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 
+	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
 	"gopkg.in/yaml.v2"
@@ -18,8 +19,8 @@ type Config struct {
 	BuildVersion       string `json:"build-version" yaml:"build-version"`
 	GithubAccessToken  string `json:"github-access-token" yaml:"github-access-token"`
 	RegistryRoot       string `json:"registry-root" yaml:"registry-root"`
-	RegistryRepo       string `json:"registry-repo" yaml:"registry-repo"`
-	RegistryRepoBranch string `json:"registry-repo-branch" yaml:"registry-repo-branch"`
+	RegistryForkName   string `json:"registry-fork-name" yaml:"registry-fork-name"`
+	RegistryRootBranch string `json:"registry-root-branch" yaml:"registry-root-branch"`
 	GitName            string `json:"git-name" yaml:"git-name"`
 	GitEmail           string `json:"git-email" yaml:"git-email"`
 	CommitMessage      string `json:"commit-message" yaml:"commit-message"`
@@ -65,6 +66,14 @@ func (c *Config) MustYAML() []byte {
 		panic(err)
 	}
 	return out
+}
+
+// BasicAuth - build basic auth credentials from theconfiguration
+func (c *Config) BasicAuth() *http.BasicAuth {
+	return &http.BasicAuth{
+		Username: c.GitName,
+		Password: c.GithubAccessToken,
+	}
 }
 
 // Binary is everything you need to build the binary

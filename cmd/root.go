@@ -20,6 +20,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/tendermint/tendermint/libs/log"
 
 	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
 	"github.com/spf13/viper"
@@ -30,6 +31,7 @@ var (
 	config     *registrar.Config
 	cfgFlag    = "config"
 	defaultCfg = os.ExpandEnv("$HOME/.registrar.yaml")
+	logger     = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
 )
 
 func init() {
