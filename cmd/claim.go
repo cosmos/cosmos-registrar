@@ -18,16 +18,14 @@ package cmd
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"os"
 	"path"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/jackzampolin/cosmos-registrar/pkg/gitwrap"
 	"github.com/jackzampolin/cosmos-registrar/pkg/node"
-	"github.com/jackzampolin/cosmos-registrar/pkg/prompts"
 	"github.com/noandrea/go-codeowners"
 
 	"github.com/spf13/afero"
@@ -43,25 +41,23 @@ var claimCmd = &cobra.Command{
 	Use:   "claim",
 	Short: "Claim a name for a cosmos based chain",
 	Long: `This command allows you to submit a claim request for 
-a name for you chain.`,
-	Run: claim,
+a name for you chain.
+
+`,
+	Run:  claim,
+	Args: cobra.ExactArgs(1),
 }
 
 func init() {
 	rootCmd.AddCommand(claimCmd)
 }
 
-func branchRef(name string) string {
-	return fmt.Sprint("refs/heads/", name)
-}
-
 func claim(cmd *cobra.Command, args []string) {
 	// fetch network
+	config.RPCAddr = strings.TrimSpace(args[0])
 	// fetch the chain data
 	claimName, err := node.FetchChainID(config)
-
 	var (
-		rootURL        = config.RegistryRoot
 		forkURL        = fmt.Sprintf("https://github.com/%s/%s.git", config.GitName, config.RegistryForkName)
 		forkRepoFolder = path.Join(config.Workspace, config.RegistryForkName)
 	)
@@ -72,44 +68,13 @@ func claim(cmd *cobra.Command, args []string) {
 	// check if root url is valid
 	_, err = url.Parse(config.RegistryRoot)
 	AbortIfError(err, "the registry root url is not a valid url: %s", config.RegistryRoot)
-	// ask use to create a fork
-	println("create a fork using this link:", fmt.Sprintf("%s/fork", rootURL))
-	if ok := prompts.Confirm("did you create the fork", "Y"); !ok {
-		println("please create the fork before continuing")
-		return
-	}
-	// root repo folder
-	forkExists, err := afero.DirExists(fs, forkRepoFolder)
-	AbortIfError(err, "the local path cannot be inspected: %v", err)
-	if !forkExists {
-		println("cloning the root registry from", forkURL)
-		// create the workspace just in case
-		err = fs.MkdirAll(config.Workspace, 0700)
-		AbortIfError(err, "the registry root url is not a valid url!")
-		// clone the repo
-		_, err := git.PlainClone(forkRepoFolder, false, &git.CloneOptions{
-			URL:      forkURL,
-			Progress: os.Stdout,
-		})
-		AbortIfError(err, "aborted duet to an error cloning the root repo: %v", err)
-	}
-	// pull the root
-	repo, err := git.PlainOpen(forkRepoFolder)
-	AbortIfError(err, "failed to open repository at %s", forkRepoFolder)
-	wt, err := repo.Worktree()
-	// move to main branch
-	// TODO: what if the path isn't clean?
-	err = wt.Checkout(&git.CheckoutOptions{
-		Create: false,
-		Branch: plumbing.ReferenceName(branchRef(config.RegistryRootBranch)),
-	})
+
+	repo, err := gitwrap.CloneOrOpen(forkURL, forkRepoFolder)
+	AbortIfError(err, "aborted due to an error cloning the root repo: %v", err)
+
+	gitwrap.PullBranch(repo, config.RegistryRootBranch)
 	AbortIfError(err, "something went wrong checking out branch %s: %v", config.RegistryRootBranch, err)
-	if err = wt.Pull(&git.PullOptions{RemoteName: "origin"}); err != nil {
-		if err != git.NoErrAlreadyUpToDate {
-			AbortIfError(err, "failed to to pull origin: %v", err)
-		}
-		println("registry root is up to date")
-	}
+
 	// now we have the root repo
 	// read the the codeowners file
 	co, err := codeowners.FromFile(forkRepoFolder)
@@ -138,14 +103,13 @@ func claim(cmd *cobra.Command, args []string) {
 	// create the branch with the name `claimName`
 	// TODO check if the branch exits
 	println("checking out branch ", claimName)
-	err = wt.Checkout(&git.CheckoutOptions{
-		Create: true,
-		Branch: plumbing.ReferenceName(branchRef(claimName)),
-	})
+	err = gitwrap.CreateBranch(repo, claimName)
+	AbortIfError(err, "cannot create branch: %v", err)
+
 	// add a subfolder `claimName`
 	claimPath := path.Join(forkRepoFolder, claimName)
 	err = fs.Mkdir(claimPath, 0700)
-	println("creating chain folder ", claimPath)
+	println("creating chain folder for", claimName)
 	AbortIfError(err, "cannot create claim folder: %v", err)
 
 	// fetch the chain data
@@ -162,30 +126,20 @@ func claim(cmd *cobra.Command, args []string) {
 	err = co.ToFile(coFile)
 	// commit the data
 
-	_, err = wt.Add(codeownersFile)
-	println("schedule for commit", coFile)
-	AbortIfError(err, "error adding the %s to git: %v", coFile, err)
-
-	_, err = wt.Add(claimName)
-	println("schedule for commit", claimPath)
+	err = gitwrap.StageToCommit(repo, codeownersFile, claimName)
+	println("schedule changes for commit", codeownersFile)
+	AbortIfError(err, "error adding the %s to git: %v", codeownersFile, err)
 
 	commitMsg := fmt.Sprintf("submit record for chain ID %s", claimName)
-	AbortIfError(err, "error adding the %s to git: %v", coFile, err)
-	commit, err := wt.Commit(commitMsg, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  config.GitName,
-			Email: config.GitEmail,
-			When:  time.Now(),
-		},
-	})
-	AbortIfErrorWith(func() { wt.Reset(&git.ResetOptions{}) }, err, "git commit error : %v", err)
-	println("claim committed with hash", commit.String())
-	// push to remote `fork`
-	err = repo.Push(&git.PushOptions{
-		Auth:     config.BasicAuth(),
-		Progress: os.Stdout,
-	})
+	commit, err := gitwrap.CommitAndPush(repo,
+		config.GitName,
+		config.GitEmail,
+		commitMsg,
+		time.Now(),
+		config.BasicAuth())
 	AbortIfError(err, "git push error : %v", err)
+	println("committed with hash", commit)
+
 	// open the github page to submit the PR to mainRepo
 	prURL := fmt.Sprintf("%s/compare/%s...%s:%s", config.RegistryRoot, config.RegistryRootBranch, config.GitName, claimName)
 	println("the changes has been recorded in your private fork, to submit it create a pull request using this link")
@@ -198,17 +152,6 @@ func AbortIfError(err error, message string, v ...interface{}) {
 	if err == nil {
 		return
 	}
-	fmt.Printf(message, v...)
-	fmt.Println()
-	os.Exit(1)
-}
-
-// AbortIfErrorWith execute a function and abort command if there is an error
-func AbortIfErrorWith(abortFunc func(), err error, message string, v ...interface{}) {
-	if err == nil {
-		return
-	}
-	abortFunc()
 	fmt.Printf(message, v...)
 	fmt.Println()
 	os.Exit(1)
