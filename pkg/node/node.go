@@ -60,7 +60,7 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 		err = fmt.Errorf("node(%s) on chain(%s) still catching up", config.RPCAddr, chainID)
 		return
 	default:
-		logger.Info("GET /status", "rpc-addr", config.RPCAddr)
+		logger.Debug("GET /status", "rpc-addr", config.RPCAddr)
 	}
 
 	eg.Go(func() error {
@@ -68,7 +68,7 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 		if err != nil {
 			return fmt.Errorf("genesis file: %s", err)
 		}
-		logger.Info("GET /genesis", "rpc-addr", config.RPCAddr)
+		logger.Debug("GET /genesis", "rpc-addr", config.RPCAddr)
 		return nil
 	})
 
@@ -78,7 +78,7 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 		if err != nil {
 			return fmt.Errorf("commit: %s", err)
 		}
-		logger.Info(fmt.Sprintf("GET /commit?height=%d", h), "rpc-addr", config.RPCAddr)
+		logger.Debug(fmt.Sprintf("GET /commit?height=%d", h), "rpc-addr", config.RPCAddr)
 		return nil
 	})
 
@@ -90,7 +90,7 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 		if err != nil {
 			return fmt.Errorf("net-info: %s", err)
 		}
-		logger.Info("GET /net_info", "rpc-addr", config.RPCAddr)
+		logger.Debug("GET /net_info", "rpc-addr", config.RPCAddr)
 		return nil
 	})
 
@@ -129,7 +129,7 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 	eg.Go(func() error {
 		qp := stringsFromPeers(netInfo.Peers)
 		if _, err = os.Stat(rdir.peersPath()); os.IsNotExist(err) {
-			logger.Info("no peers file, popoulating from /net_info", "num", len(qp))
+			logger.Debug("no peers file, populating from /net_info", "num", len(qp))
 			out, err := json.MarshalIndent(qp, "", "  ")
 			if err != nil {
 				return fmt.Errorf("marshaling peers: %s", err)
@@ -154,7 +154,7 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 		pf.Close()
 		ps := dedupe(append(fp, qp...))
 		// TODO: we should check peer liveness here
-		logger.Info(fmt.Sprintf("added %d new peers to %s", len(ps)-len(fp), path.Base(rdir.peersPath())))
+		logger.Debug(fmt.Sprintf("added %d new peers to %s", len(ps)-len(fp), path.Base(rdir.peersPath())))
 		w, err := json.MarshalIndent(ps, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshaling peers: %s", err)
