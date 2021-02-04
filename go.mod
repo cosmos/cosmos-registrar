@@ -5,6 +5,7 @@ go 1.15
 require (
 	github.com/go-git/go-git/v5 v5.2.0
 	github.com/manifoldco/promptui v0.8.0
+	github.com/muja/goconfig v0.0.0-20180417074348-0a635507dddc
 	github.com/noandrea/go-codeowners v0.2.3-0.20210201204955-4def1c883cf7
 	github.com/spf13/afero v1.5.1
 	github.com/spf13/cobra v1.1.1
