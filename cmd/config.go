@@ -6,31 +6,37 @@ import (
 	"path"
 
 	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
+	"github.com/jackzampolin/cosmos-registrar/pkg/gitwrap"
 	"github.com/jackzampolin/cosmos-registrar/pkg/prompts"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/tendermint/tendermint/libs/log"
 )
 
 func init() {
 	// Set Defaults
-	viper.SetDefault("rpc-addr", "http://localhost:26657")
-	viper.SetDefault("chain-id", "cosmoshub-3")
-	viper.SetDefault("build-repo", "https://github.com/cosmos/gaia")
-	viper.SetDefault("build-command", "gaiad")
-	viper.SetDefault("binary-name", "make install")
-	viper.SetDefault("build-version", "v2.0.13")
+	// viper.SetDefault("rpc-addr", "http://localhost:26657")
+	// viper.SetDefault("chain-id", "cosmoshub-3")
+	// viper.SetDefault("build-repo", "https://github.com/cosmos/gaia")
+	// viper.SetDefault("build-command", "gaiad")
+	// viper.SetDefault("binary-name", "make install")
+	// viper.SetDefault("build-version", "v2.0.13")
 	viper.SetDefault("github-access-token", "get yours at https://github.com/settings/tokens")
 	viper.SetDefault("registry-root", "https://github.com/cosmos/registry")
 	viper.SetDefault("registry-fork-name", "registry")
 	viper.SetDefault("registry-root-branch", "main")
 	viper.SetDefault("git-name", "Your name goes here")
 	viper.SetDefault("git-email", "your@email.here")
-	viper.SetDefault("commit-message", "update roots of trust")
+	// viper.SetDefault("commit-message", "update roots of trust")
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
+	if !debug {
+		log.AllowLevel("debug")
+	}
+
 	config = &registrar.Config{}
 	configPath, err := os.UserConfigDir()
 	if err != nil {
@@ -62,27 +68,31 @@ func initConfig() {
 	} else {
 		switch err.(type) {
 		case viper.ConfigFileNotFoundError:
+			if noInteraction {
+				println("config file not found")
+				os.Exit(1)
+			}
 			if err = interactiveSetup(); err != nil {
 				println("unexpected error ", err.Error())
-				return
+				os.Exit(1)
 			}
 			viper.Unmarshal(config)
 			println("The configuration is:")
 			prompts.PrettyMap(viper.AllSettings())
 			if ok := prompts.Confirm("is it correct?", "n"); !ok {
 				println("aborting, run the command again to change the configuration")
-				return
+				os.Exit(0)
 			}
 
 			if err = viper.WriteConfigAs(cfgFilePath); err != nil {
 				println("aborting, error writing the configuration file:", err.Error())
-				return
+				os.Exit(1)
 			}
 			println("config file saved in ", cfgFilePath)
 
 		default:
 			println("the configuration file appers corrupted: ", err.Error())
-			panic("error")
+			os.Exit(1)
 		}
 	}
 	// set the config workspace folder
@@ -91,40 +101,50 @@ func initConfig() {
 
 // Setup guides the user to setup their environmant
 func interactiveSetup() (err error) {
-	println(`Welcome to the Cosmos registry tool. 
-This tool will allow you to publicly claim your Chain ID for your 
-cosmos based chain.`)
-	println()
-	println(`To complete the setup you need a Github account and 
-network connectivity to a node of your chain.`)
-	println()
+	println(`
+Welcome to the Cosmos registry tool. 
+This tool will allow you to publicly claim a Chain ID 
+for your cosmos based chain.
+
+To complete the setup you need a GitHub account and 
+network connectivity to a node of your chain.
+`)
 	// ask to start
-	if goOn := prompts.Confirm("do you have them available?", "Y"); !goOn {
+	if goOn := prompts.Confirm("do you have them available", "Y"); !goOn {
 		println("please make sure you get them and the run the setup again")
-		return
+		os.Exit(0)
 	}
-	// next get the github user
-	gitName, err := prompts.InputRequired("enter your github name")
+
+	user, email := gitwrap.GetGlobalGitIdentity()
+
+	// next get the git user
+	gitName, err := prompts.InputOrDefault(user, "enter your git username")
 	if err != nil {
 		println(err.Error())
+		os.Exit(1)
 	}
 	viper.Set("git-name", gitName)
 
+	// next get the git email
+	gitEmail, err := prompts.InputOrDefault(email, "enter your git email")
+	if err != nil {
+		println(err.Error())
+		os.Exit(1)
+	}
+	viper.Set("git-email", gitEmail)
+
 	// now get the github token
-	println()
-	println(`the next step is to enter a github personal token for your account , 
-if you don't have one you can get it from 
+	println(`
+The next step is to enter a github personal token for your account , 
+if you don't have one you can get it from
+
 https://github.com/settings/tokens
-make sure that you select the permission repo > public_repo`)
-	println()
+
+(make sure that you select the permission repo > public_repo)
+`)
+
 	token, err := prompts.InputRequired("%s personal token", gitName)
 	viper.Set("github-access-token", token)
-
-	println()
-	// now get the github token
-	println("what is a node rpc address for the chain you want to register (eg. http://10.0.0.1:26657)")
-	rpc, err := prompts.InputRequired("rpc address")
-	viper.Set("rpc-addr", rpc)
 
 	println("the setup is now completed")
 	return
