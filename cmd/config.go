@@ -18,12 +18,16 @@ func init() {
 	// Set Defaults
 	// viper.SetDefault("rpc-addr", "http://localhost:26657")
 	// viper.SetDefault("chain-id", "cosmoshub-3")
+
+	// TODO how to get this data? can it be retrieved or shall be asked to the user?
+	// Asking to the user may result in not being a reliable info
 	// viper.SetDefault("build-repo", "https://github.com/cosmos/gaia")
 	// viper.SetDefault("build-command", "gaiad")
 	// viper.SetDefault("binary-name", "make install")
 	// viper.SetDefault("build-version", "v2.0.13")
+
 	viper.SetDefault("github-access-token", "get yours at https://github.com/settings/tokens")
-	viper.SetDefault("registry-root", "https://github.com/cosmos/registry")
+	viper.SetDefault("registry-root", "https://github.com/apeunit/registry")
 	viper.SetDefault("registry-fork-name", "registry")
 	viper.SetDefault("registry-root-branch", "main")
 	viper.SetDefault("git-name", "Your name goes here")
@@ -77,9 +81,10 @@ func initConfig() {
 				os.Exit(1)
 			}
 			viper.Unmarshal(config)
-			println("The configuration is:")
+			println("\nThe configuration is:")
 			prompts.PrettyMap(viper.AllSettings())
-			if ok := prompts.Confirm("is it correct?", "n"); !ok {
+			println()
+			if ok := prompts.Confirm(false, "save the configuration?"); !ok {
 				println("aborting, run the command again to change the configuration")
 				os.Exit(0)
 			}
@@ -110,7 +115,7 @@ To complete the setup you need a GitHub account and
 network connectivity to a node of your chain.
 `)
 	// ask to start
-	if goOn := prompts.Confirm("do you have them available", "Y"); !goOn {
+	if goOn := prompts.Confirm(true, "do you have them available"); !goOn {
 		println("please make sure you get them and the run the setup again")
 		os.Exit(0)
 	}
@@ -143,7 +148,11 @@ https://github.com/settings/tokens
 (make sure that you select the permission repo > public_repo)
 `)
 
-	token, err := prompts.InputRequired("%s personal token", gitName)
+	token, err := prompts.Password("%s personal token", gitName)
+	if err != nil {
+		println(err.Error())
+		os.Exit(1)
+	}
 	viper.Set("github-access-token", token)
 
 	println("the setup is now completed")

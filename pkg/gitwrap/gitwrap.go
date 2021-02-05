@@ -47,7 +47,7 @@ func GetGlobalGitIdentity() (user, email string) {
 }
 
 // CloneOrOpen - shortcut to cloning a repo or opening an existing one
-func CloneOrOpen(repoURL, destFolder string) (repo *git.Repository, err error) {
+func CloneOrOpen(repoURL, destFolder string, auth *http.BasicAuth) (repo *git.Repository, err error) {
 	forkExists, err := afero.DirExists(fs, destFolder)
 	if err != nil {
 		return
@@ -64,6 +64,7 @@ func CloneOrOpen(repoURL, destFolder string) (repo *git.Repository, err error) {
 		repo, err = git.PlainClone(destFolder, false, &git.CloneOptions{
 			URL:      repoURL,
 			Progress: ProgressOutout,
+			Auth:     auth,
 		})
 		return
 	}

@@ -187,13 +187,13 @@ func updateFileGo(pth string, payload []byte, log log.Logger) func() error {
 }
 
 func updateFile(pth string, payload []byte, log log.Logger) error {
-	log.Info(fmt.Sprintf("deleting pth %s", path.Base(pth)))
+	log.Debug(fmt.Sprintf("deleting path %s", path.Base(pth)))
 	os.Remove(pth)
 	return writeFile(pth, payload, log)
 }
 
 func writeFile(pth string, payload []byte, log log.Logger) (err error) {
-	log.Info(fmt.Sprintf("writing pth %s", path.Base(pth)))
+	log.Debug(fmt.Sprintf("writing path %s", path.Base(pth)))
 	if err = ioutil.WriteFile(pth, payload, 0644); err != nil {
 		return fmt.Errorf("writing %s: %s", pth, err)
 	}
@@ -202,7 +202,7 @@ func writeFile(pth string, payload []byte, log log.Logger) (err error) {
 
 func createDirIfNotExist(pth string, log log.Logger) (err error) {
 	if _, err = os.Stat(pth); os.IsNotExist(err) {
-		log.Info("creating directory", "dir", path.Base(pth))
+		log.Debug("creating directory", "dir", path.Base(pth))
 		if err = os.Mkdir(pth, os.ModePerm); err != nil {
 			return fmt.Errorf("making dir %s: %s", pth, err)
 		}

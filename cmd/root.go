@@ -75,12 +75,15 @@ func interact(cmd *cobra.Command, args []string) {
 				println(`
 Good choice, following this process you will submit a 
 pull request to the chain IDs registry hosted on GitHub:
+
 ` + config.RegistryRoot + `
 
 The first step is to create a fork of the registry using this link:
-` + fmt.Sprintf("%s/fork", config.RegistryRoot))
 
-				if ok := prompts.Confirm("Go ahead and confirm when you have done so", "Y"); !ok {
+` + fmt.Sprintf("%s/fork", config.RegistryRoot) + `
+`)
+
+				if ok := prompts.Confirm(true, "Go ahead and confirm when you have done so"); !ok {
 					println("please create the fork before continuing")
 					return
 				}

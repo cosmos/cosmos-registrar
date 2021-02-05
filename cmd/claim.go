@@ -26,6 +26,7 @@ import (
 
 	"github.com/jackzampolin/cosmos-registrar/pkg/gitwrap"
 	"github.com/jackzampolin/cosmos-registrar/pkg/node"
+	"github.com/jackzampolin/cosmos-registrar/pkg/prompts"
 	"github.com/noandrea/go-codeowners"
 
 	"github.com/spf13/afero"
@@ -69,8 +70,8 @@ func claim(cmd *cobra.Command, args []string) {
 	_, err = url.Parse(config.RegistryRoot)
 	AbortIfError(err, "the registry root url is not a valid url: %s", config.RegistryRoot)
 
-	repo, err := gitwrap.CloneOrOpen(forkURL, forkRepoFolder)
-	AbortIfError(err, "aborted due to an error cloning the root repo: %v", err)
+	repo, err := gitwrap.CloneOrOpen(forkURL, forkRepoFolder, config.BasicAuth())
+	AbortIfError(err, "aborted due to an error cloning registry fork repo: %v", err)
 
 	gitwrap.PullBranch(repo, config.RegistryRootBranch)
 	AbortIfError(err, "something went wrong checking out branch %s: %v", config.RegistryRootBranch, err)
@@ -127,7 +128,9 @@ func claim(cmd *cobra.Command, args []string) {
 	// commit the data
 
 	err = gitwrap.StageToCommit(repo, codeownersFile, claimName)
-	println("schedule changes for commit", codeownersFile)
+	println("schedule changes to commit:")
+	println("-", codeownersFile)
+	println("-", claimName)
 	AbortIfError(err, "error adding the %s to git: %v", codeownersFile, err)
 
 	commitMsg := fmt.Sprintf("submit record for chain ID %s", claimName)
@@ -138,12 +141,25 @@ func claim(cmd *cobra.Command, args []string) {
 		time.Now(),
 		config.BasicAuth())
 	AbortIfError(err, "git push error : %v", err)
-	println("committed with hash", commit)
+	println("changes committed with hash", commit)
 
 	// open the github page to submit the PR to mainRepo
 	prURL := fmt.Sprintf("%s/compare/%s...%s:%s", config.RegistryRoot, config.RegistryRootBranch, config.GitName, claimName)
-	println("the changes has been recorded in your private fork, to submit it create a pull request using this link")
+	println(`
+The changes have been recorded in your private fork,
+to submit your request for review file a pull request to
+the main registry's repository following this link:
+`)
 	println(prURL)
+	println(`
+Once your pull request will be reviewed you will be notified 
+of the results.
+`)
+	if ok := prompts.Confirm(false, "Do you want to continue?"); !ok {
+		println("goodby!")
+		os.Exit(0)
+	}
+
 	return
 }
 
