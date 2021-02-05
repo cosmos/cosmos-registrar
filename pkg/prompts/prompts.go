@@ -1,62 +1,51 @@
 package prompts
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/manifoldco/promptui"
+	"github.com/AlecAivazis/survey/v2"
 )
 
 // Confirm - prompt the user for a yes/no answer
-func Confirm(f, defaultAnswer string, v ...interface{}) bool {
-	prompt := promptui.Prompt{
-		Label:     fmt.Sprintf(f, v...),
-		IsConfirm: true,
-		Default:   defaultAnswer,
+func Confirm(defaultAnswer bool, q string, v ...interface{}) (answer bool) {
+	prompt := &survey.Confirm{
+		Message: fmt.Sprintf(q, v...),
+		Default: defaultAnswer,
 	}
-	result, err := prompt.Run()
+	err := survey.AskOne(prompt, &answer)
 	if err != nil {
-		return false
+		answer = defaultAnswer
 	}
-	result = strings.TrimSpace(result)
-	if result == "" {
-		result = strings.ToLower(defaultAnswer)
-	}
-	return strings.ToLower(strings.TrimSpace(result)) == "y"
+	return
 }
 
 // InputRequired - ask user for mandatory input
-func InputRequired(q string, v ...interface{}) (string, error) {
-	return input(func(v string) (err error) {
-		if strings.TrimSpace(v) == "" {
-			err = errors.New("the answer cannot be empty")
-		}
-		return
-	}, "", q, v...)
+func InputRequired(q string, v ...interface{}) (answer string, err error) {
+	prompt := &survey.Input{
+		Message: fmt.Sprintf(q, v...),
+	}
+	err = survey.AskOne(prompt, &answer, survey.WithValidator(survey.Required))
+	return
 }
 
 // InputOrDefault - ask user for mandatory input
-func InputOrDefault(defaultValue, q string, v ...interface{}) (string, error) {
-	return input(func(v string) (err error) {
-		if strings.TrimSpace(v) == "" {
-			err = errors.New("the answer cannot be empty")
-		}
-		return
-	}, defaultValue, q, v...)
+func InputOrDefault(defaultValue, q string, v ...interface{}) (answer string, err error) {
+	prompt := &survey.Input{
+		Message: fmt.Sprintf(q, v...),
+		Default: defaultValue,
+	}
+	err = survey.AskOne(prompt, &answer)
+	return
 }
 
-func input(validator func(v string) error, defaultValue, q string, v ...interface{}) (res string, err error) {
-	prompt := promptui.Prompt{
-		Label:    fmt.Sprintf(q, v...),
-		Validate: validator,
-		Default:  defaultValue,
+// Password - ask user for password input
+func Password(q string, v ...interface{}) (password string, err error) {
+	prompt := &survey.Password{
+		Message: fmt.Sprintf(q, v...),
 	}
-	res, err = prompt.Run()
-	if strings.TrimSpace(res) == "" {
-		res = defaultValue
-	}
+	err = survey.AskOne(prompt, &password, survey.WithValidator(survey.Required))
 	return
 }
 
@@ -64,17 +53,22 @@ func input(validator func(v string) error, defaultValue, q string, v ...interfac
 func PrettyMap(data map[string]interface{}) {
 	var settings sort.StringSlice
 	for k, v := range data {
+		if strings.Contains(k, "token") {
+			v = "********"
+		}
 		settings = append(settings, fmt.Sprintf("%-22s: %s", k, v))
 	}
 	sort.Sort(settings)
 	println(strings.Join(settings, "\n"))
 }
 
+// Option - to be used for a select input
 type Option struct {
 	Label string
 	Func  func() error
 }
 
+// NewOption - create a new option
 func NewOption(label string, op func() error) Option {
 	return Option{
 		Label: label,
@@ -82,17 +76,18 @@ func NewOption(label string, op func() error) Option {
 	}
 }
 
+// Select - render a select field
 func Select(q string, options ...Option) (err error) {
-
 	items := make([]string, len(options))
 	for i, o := range options {
 		items[i] = o.Label
 	}
-	prompt := promptui.Select{
-		Label: q,
-		Items: items,
+	var index int
+	prompt := &survey.Select{
+		Message: q,
+		Options: items,
 	}
-	index, _, err := prompt.Run()
+	err = survey.AskOne(prompt, &index)
 	if err != nil {
 		return
 	}
