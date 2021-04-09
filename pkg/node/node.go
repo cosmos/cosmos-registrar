@@ -1,17 +1,21 @@
 package node
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"path"
 	"strings"
 
-	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
 	"github.com/tendermint/tendermint/libs/log"
+	"github.com/tendermint/tendermint/p2p"
+	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
+	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
 	tmtypes "github.com/tendermint/tendermint/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -24,14 +28,30 @@ var (
 	eg      errgroup.Group
 )
 
+// Client returns a tendermint client to work against the configured chain
+func Client(rpcAddress string) (*rpchttp.HTTP, error) {
+	httpClient, err := libclient.DefaultHTTPClient(rpcAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	rpcClient, err := rpchttp.NewWithClient(rpcAddress, "/websocket", httpClient)
+	if err != nil {
+		return nil, err
+	}
+
+	return rpcClient, nil
+}
+
 // FetchChainID - retrieve the chain ID from a rpc endpoint
-func FetchChainID(config *registrar.Config) (chainID string, err error) {
-	client, err := config.Client()
+func FetchChainID(rpcAddress string) (chainID string, err error) {
+	client, err := Client(rpcAddress)
 	if err != nil {
 		err = fmt.Errorf("error creating tendermint client: %s", err)
 		return
 	}
-	stat, err := client.Status()
+	ctx := context.Background()
+	stat, err := client.Status(ctx)
 	if err != nil {
 		err = fmt.Errorf("error fetching client status: %s", err)
 		return
@@ -40,45 +60,51 @@ func FetchChainID(config *registrar.Config) (chainID string, err error) {
 	return
 }
 
+// LoadPeers load the information about the chain nodes
+func LoadPeers(basepath, chainID, rpcAddress string, logger log.Logger) (peers []string, err error) {
+	return
+}
+
 // DumpInfo connect to ad node and dumps the info about
 // that chain into a folder
-func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Logger) (err error) {
-	client, err := config.Client()
+func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err error) {
+	client, err := Client(rpcAddress)
 	if err != nil {
 		err = fmt.Errorf("error creating tendermint client: %s", err)
 		return
 	}
-	stat, err := client.Status()
+	ctx := context.Background()
+	stat, err := client.Status(ctx)
 	switch {
 	case err != nil:
 		err = fmt.Errorf("error fetching client status: %s", err)
 		return
 	case stat.NodeInfo.Network != chainID:
-		err = fmt.Errorf("node(%s) is on chain(%s) not configured chain(%s)", config.RPCAddr, stat.NodeInfo.Network, chainID)
+		err = fmt.Errorf("node(%s) is on chain(%s) not configured chain(%s)", rpcAddress, stat.NodeInfo.Network, chainID)
 		return
 	case stat.SyncInfo.CatchingUp:
-		err = fmt.Errorf("node(%s) on chain(%s) still catching up", config.RPCAddr, chainID)
+		err = fmt.Errorf("node(%s) on chain(%s) still catching up", rpcAddress, chainID)
 		return
 	default:
-		logger.Debug("GET /status", "rpc-addr", config.RPCAddr)
+		logger.Debug("GET /status", "rpc-addr", rpcAddress)
 	}
 
 	eg.Go(func() error {
-		gen, err = client.Genesis()
+		gen, err = client.Genesis(ctx)
 		if err != nil {
 			return fmt.Errorf("genesis file: %s", err)
 		}
-		logger.Debug("GET /genesis", "rpc-addr", config.RPCAddr)
+		logger.Debug("GET /genesis", "rpc-addr", rpcAddress)
 		return nil
 	})
 
 	eg.Go(func() error {
 		h := stat.SyncInfo.LatestBlockHeight
-		commit, err = client.Commit(&h)
+		commit, err = client.Commit(ctx, &h)
 		if err != nil {
 			return fmt.Errorf("commit: %s", err)
 		}
-		logger.Debug(fmt.Sprintf("GET /commit?height=%d", h), "rpc-addr", config.RPCAddr)
+		logger.Debug(fmt.Sprintf("GET /commit?height=%d", h), "rpc-addr", rpcAddress)
 		return nil
 	})
 
@@ -86,11 +112,11 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 	// this would crawl the network a couple of hops
 	// and find more peers
 	eg.Go(func() error {
-		netInfo, err = client.NetInfo()
+		netInfo, err = client.NetInfo(ctx)
 		if err != nil {
 			return fmt.Errorf("net-info: %s", err)
 		}
-		logger.Debug("GET /net_info", "rpc-addr", config.RPCAddr)
+		logger.Debug("GET /net_info", "rpc-addr", rpcAddress)
 		return nil
 	})
 
@@ -109,7 +135,8 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 	// TODO: sanity checks on the genesis file returned from the chain compared with repo
 	eg.Go(updateFileGo(rdir.latestPath(), NewLightRoot(commit.SignedHeader), logger))
 	eg.Go(updateFileGo(rdir.heightPath(commit.SignedHeader.Header.Height), NewLightRoot(commit.SignedHeader), logger))
-	eg.Go(updateFileGo(rdir.binariesPath(), config.Binary(), logger))
+	// TODO: not sure about this one, but we should be able to get the node version from the rpc
+	// eg.Go(updateFileGo(rdir.binariesPath(), config.Binary(), logger))
 	eg.Go(func() error {
 		if _, err = os.Stat(rdir.genesisPath()); os.IsNotExist(err) {
 			sum, write, err := sortedGenesis(gen.Genesis)
@@ -127,7 +154,12 @@ func DumpInfo(basePath, chainID string, config *registrar.Config, logger log.Log
 		return nil
 	})
 	eg.Go(func() error {
-		qp := stringsFromPeers(netInfo.Peers)
+		// add the current node
+		u, _ := url.Parse(rpcAddress)
+		entryNodeURL := nodeCoordinatesToStr(stat.NodeInfo.ID(), u.Hostname(), u.Port())
+		qp := []string{entryNodeURL}
+		// add the peer nodes
+		qp = append(qp, stringsFromPeers(netInfo.Peers)...)
 		if _, err = os.Stat(rdir.peersPath()); os.IsNotExist(err) {
 			logger.Debug("no peers file, populating from /net_info", "num", len(qp))
 			out, err := json.MarshalIndent(qp, "", "  ")
@@ -213,9 +245,18 @@ func createDirIfNotExist(pth string, log log.Logger) (err error) {
 func stringsFromPeers(ni []ctypes.Peer) (qp []string) {
 	for _, p := range ni {
 		port := strings.Split(p.NodeInfo.ListenAddr, ":")
-		qp = append(qp, fmt.Sprintf("%s@%s:%s", p.NodeInfo.ID(), p.RemoteIP, port[len(port)-1]))
+		qp = append(qp, nodeCoordinatesToStr(p.NodeInfo.ID(), p.RemoteIP, port[len(port)-1]))
 	}
 	return
+}
+
+// stringify a node rpc address and id
+func nodeCoordinatesToStr(id p2p.ID, ip, port string) string {
+	if port == "" {
+		// avoid having a blank port
+		port = "26657"
+	}
+	return fmt.Sprintf("%s@%s:%s", id, ip, port)
 }
 
 func sortedGenesis(gen *tmtypes.GenesisDoc) (sum string, indented []byte, err error) {

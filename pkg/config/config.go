@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
-	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
-	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
 	"gopkg.in/yaml.v2"
 )
 
@@ -53,21 +51,6 @@ func (c *Config) Binary() []byte {
 		Version: c.BuildVersion,
 	}, "", "  ")
 	return out
-}
-
-// Client returns a tendermint client to work against the configured chain
-func (c *Config) Client() (*rpchttp.HTTP, error) {
-	httpClient, err := libclient.DefaultHTTPClient(c.RPCAddr)
-	if err != nil {
-		return nil, err
-	}
-
-	rpcClient, err := rpchttp.NewWithClient(c.RPCAddr, "/websocket", httpClient)
-	if err != nil {
-		return nil, err
-	}
-
-	return rpcClient, nil
 }
 
 // YAML converts the config into yaml bytes
