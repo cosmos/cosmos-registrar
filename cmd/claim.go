@@ -27,6 +27,7 @@ import (
 	"github.com/jackzampolin/cosmos-registrar/pkg/gitwrap"
 	"github.com/jackzampolin/cosmos-registrar/pkg/node"
 	"github.com/jackzampolin/cosmos-registrar/pkg/prompts"
+	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
 	"github.com/noandrea/go-codeowners"
 
 	"github.com/spf13/afero"
@@ -42,9 +43,7 @@ var claimCmd = &cobra.Command{
 	Use:   "claim",
 	Short: "Claim a name for a cosmos based chain",
 	Long: `This command allows you to submit a claim request for 
-a name for you chain.
-
-`,
+a name for you chain.`,
 	Run:  claim,
 	Args: cobra.ExactArgs(1),
 }
@@ -55,31 +54,31 @@ func init() {
 
 func claim(cmd *cobra.Command, args []string) {
 	// fetch network
-	config.RPCAddr = strings.TrimSpace(args[0])
+	rpcAddress := strings.TrimSpace(args[0])
 	// fetch the chain data
-	claimName, err := node.FetchChainID(config)
+	claimName, err := node.FetchChainID(rpcAddress)
 	var (
 		forkURL        = fmt.Sprintf("https://github.com/%s/%s.git", config.GitName, config.RegistryForkName)
 		forkRepoFolder = path.Join(config.Workspace, config.RegistryForkName)
 	)
 
-	AbortIfError(err, "error fetching the chain ID: %v", err)
+	utils.AbortIfError(err, "error fetching the chain ID: %v", err)
 	fs := afero.NewOsFs()
 
 	// check if root url is valid
 	_, err = url.Parse(config.RegistryRoot)
-	AbortIfError(err, "the registry root url is not a valid url: %s", config.RegistryRoot)
+	utils.AbortIfError(err, "the registry root url is not a valid url: %s", config.RegistryRoot)
 
 	repo, err := gitwrap.CloneOrOpen(forkURL, forkRepoFolder, config.BasicAuth())
-	AbortIfError(err, "aborted due to an error cloning registry fork repo: %v", err)
+	utils.AbortIfError(err, "aborted due to an error cloning registry fork repo: %v", err)
 
 	gitwrap.PullBranch(repo, config.RegistryRootBranch)
-	AbortIfError(err, "something went wrong checking out branch %s: %v", config.RegistryRootBranch, err)
+	utils.AbortIfError(err, "something went wrong checking out branch %s: %v", config.RegistryRootBranch, err)
 
 	// now we have the root repo
 	// read the the codeowners file
 	co, err := codeowners.FromFile(forkRepoFolder)
-	AbortIfError(err, "cannot find the CODEOWNERS file: %v", err)
+	utils.AbortIfError(err, "cannot find the CODEOWNERS file: %v", err)
 
 	// see if there are already owners
 	owners := co.LocalOwners(claimName)
@@ -105,24 +104,24 @@ func claim(cmd *cobra.Command, args []string) {
 	// TODO check if the branch exits
 	println("checking out branch ", claimName)
 	err = gitwrap.CreateBranch(repo, claimName)
-	AbortIfError(err, "cannot create branch: %v", err)
+	utils.AbortIfError(err, "cannot create branch: %v", err)
 
 	// add a subfolder `claimName`
 	claimPath := path.Join(forkRepoFolder, claimName)
 	err = fs.Mkdir(claimPath, 0700)
 	println("creating chain folder for", claimName)
-	AbortIfError(err, "cannot create claim folder: %v", err)
+	utils.AbortIfError(err, "cannot create claim folder: %v", err)
 
 	// fetch the chain data
-	err = node.DumpInfo(claimPath, claimName, config, logger)
+	err = node.DumpInfo(claimPath, claimName, rpcAddress, logger)
 	println("fetching chain data")
-	AbortIfError(err, "error connecting to the node at %s: %v", config.RPCAddr, err)
+	utils.AbortIfError(err, "error connecting to the node at %s: %v", rpcAddress, err)
 
 	println("starting claiming process for", claimName)
 	// add rule to the codeowner
 	// TODO: ensure that the chain id is compliant to CAIP-2
 	err = co.AddPattern(fmt.Sprintf("/%s/", claimName), []string{fmt.Sprint("@", config.GitName)})
-	AbortIfError(err, "invalid claim name folder: %v", err)
+	utils.AbortIfError(err, "invalid claim name folder: %v", err)
 	coFile := path.Join(forkRepoFolder, codeownersFile)
 	err = co.ToFile(coFile)
 	// commit the data
@@ -131,7 +130,7 @@ func claim(cmd *cobra.Command, args []string) {
 	println("schedule changes to commit:")
 	println("-", codeownersFile)
 	println("-", claimName)
-	AbortIfError(err, "error adding the %s to git: %v", codeownersFile, err)
+	utils.AbortIfError(err, "error adding the %s to git: %v", codeownersFile, err)
 
 	commitMsg := fmt.Sprintf("submit record for chain ID %s", claimName)
 	commit, err := gitwrap.CommitAndPush(repo,
@@ -140,7 +139,7 @@ func claim(cmd *cobra.Command, args []string) {
 		commitMsg,
 		time.Now(),
 		config.BasicAuth())
-	AbortIfError(err, "git push error : %v", err)
+	utils.AbortIfError(err, "git push error : %v", err)
 	println("changes committed with hash", commit)
 
 	// open the github page to submit the PR to mainRepo
@@ -161,14 +160,4 @@ of the results.
 	}
 
 	return
-}
-
-// AbortIfError abort command if there is an error
-func AbortIfError(err error, message string, v ...interface{}) {
-	if err == nil {
-		return
-	}
-	fmt.Printf(message, v...)
-	fmt.Println()
-	os.Exit(1)
 }
