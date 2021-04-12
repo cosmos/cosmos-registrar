@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"path"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/p2p"
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
@@ -60,8 +63,71 @@ func FetchChainID(rpcAddress string) (chainID string, err error) {
 	return
 }
 
+// LoadGenesisSum load the genesis checksum file
+func LoadGenesisSum(basePath, chainID string) (sum string, err error) {
+	repoRoot := repoDir{basePath, chainID}
+	if !utils.PathExists(repoRoot.genesisSumPath()) {
+		err = fmt.Errorf("Path %s does not exists", repoRoot.genesisSumPath())
+		return
+	}
+	fp, err := os.Open(repoRoot.genesisSumPath())
+	if err != nil {
+		return
+	}
+	defer fp.Close()
+	raw, err := io.ReadAll(fp)
+	if err != nil {
+		return
+	}
+	sum = string(raw)
+	return
+}
+
 // LoadPeers load the information about the chain nodes
-func LoadPeers(basepath, chainID, rpcAddress string, logger log.Logger) (peers []string, err error) {
+func LoadPeers(basePath, chainID, rpcAddress string, logger log.Logger) (peers map[string]*Peer, err error) {
+	repoRoot := repoDir{basePath, chainID}
+	if !utils.PathExists(repoRoot.peersPath()) {
+		return
+	}
+	// read the list of peers
+	peerList := []Peer{}
+	err = utils.FromJSON(repoRoot.peersPath(), &peerList)
+	if err != nil {
+		return
+	}
+	// map them to a map
+	for _, p := range peerList {
+		peers[p.ID] = &p
+	}
+	return
+}
+
+func SavePeers(basePath, chainID string, peers map[string]*Peer, logger log.Logger) (err error) {
+	return
+}
+
+func RefreshPeers(peers map[string]*Peer, genesisSum string) (err error) {
+	// for each pear available
+	// in the list, contact the known peers
+	// and add them to the list
+	// TODO: do not use an errorgru
+	wg := sync.WaitGroup{}
+
+	for _, p := range peers {
+		go func(peer *Peer) {
+			client, e := Client(p.Address)
+			ctx := context.Background()
+			if e != nil {
+				err = fmt.Errorf("error creating tendermint client: %s", err)
+				return
+			}
+			gen, err = client.Genesis(ctx)
+
+			wg.Done()
+		}(p)
+		wg.Add(1)
+	}
+	wg.Wait()
 	return
 }
 
@@ -154,48 +220,36 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		return nil
 	})
 	eg.Go(func() error {
-		// add the current node
-		u, _ := url.Parse(rpcAddress)
-		entryNodeURL := nodeCoordinatesToStr(stat.NodeInfo.ID(), u.Hostname(), u.Port())
-		qp := []string{entryNodeURL}
-		// add the peer nodes
-		qp = append(qp, stringsFromPeers(netInfo.Peers)...)
-		if _, err = os.Stat(rdir.peersPath()); os.IsNotExist(err) {
-			logger.Debug("no peers file, populating from /net_info", "num", len(qp))
-			out, err := json.MarshalIndent(qp, "", "  ")
-			if err != nil {
-				return fmt.Errorf("marshaling peers: %s", err)
-			}
-			return writeFile(rdir.peersPath(), out, logger)
+		updateTime := time.Now()
+		seedNode := Peer{
+			IsSeed:            true,
+			Reachable:         true,
+			Address:           rpcAddress,
+			ID:                fmt.Sprint(stat.NodeInfo.ID()),
+			LastContactHeight: stat.SyncInfo.LatestBlockHeight,
+			LastContactDate:   updateTime,
+			UpdatedAt:         updateTime,
 		}
-
-		var fp []string
-		pf, err := os.Open(rdir.peersPath())
-		if err != nil {
-			return fmt.Errorf("opening peer file: %s", err)
-		}
-		pfb, err := ioutil.ReadAll(pf)
-		if err != nil {
-			pf.Close()
-			return fmt.Errorf("reading peer file: %s", err)
-		}
-		if err = json.Unmarshal(pfb, &fp); err != nil {
-			pf.Close()
-			return fmt.Errorf("unmarshaling peer strings: %s", err)
-		}
-		pf.Close()
-		ps := dedupe(append(fp, qp...))
-		// TODO: we should check peer liveness here
-		logger.Debug(fmt.Sprintf("added %d new peers to %s", len(ps)-len(fp), path.Base(rdir.peersPath())))
-		w, err := json.MarshalIndent(ps, "", "  ")
+		out, err := json.Marshal([]Peer{seedNode})
 		if err != nil {
 			return fmt.Errorf("marshaling peers: %s", err)
 		}
-		return updateFile(rdir.peersPath(), w, logger)
+		return writeFile(rdir.peersPath(), out, logger)
 	})
 
 	err = eg.Wait()
 	return
+}
+
+// Peer structure to keep track of the status of a peer
+type Peer struct {
+	ID                string
+	Address           string
+	IsSeed            bool
+	LastContactHeight int64
+	LastContactDate   time.Time
+	UpdatedAt         time.Time
+	Reachable         bool
 }
 
 type repoDir struct {
@@ -297,6 +351,7 @@ func NewLightRoot(sh tmtypes.SignedHeader) []byte {
 	return out
 }
 
+// remove duplicate elements in a list of strings
 func dedupe(ele []string) (out []string) {
 	e := map[string]bool{}
 	for v := range ele {

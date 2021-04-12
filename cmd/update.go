@@ -1,32 +1,18 @@
-/*
-Package cmd ...
-Copyright © 2020 NAME HERE <EMAIL ADDRESS>
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 package cmd
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
+	"net/url"
+	"path"
+	"regexp"
+	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/jackzampolin/cosmos-registrar/pkg/gitwrap"
 	"github.com/jackzampolin/cosmos-registrar/pkg/node"
+	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
+	"github.com/noandrea/go-codeowners"
 	"github.com/spf13/cobra"
 )
 
@@ -34,79 +20,76 @@ import (
 var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "updates the configured registry repo with the latest data",
-	RunE: func(cmd *cobra.Command, args []string) (err error) {
-		var (
-			repo     *git.Repository
-			worktree *git.Worktree
+	RunE:  update,
+}
 
-			authOpts = &http.BasicAuth{
-				Username: "emptystring",
-				Password: config.GithubAccessToken,
+func update(cmd *cobra.Command, args []string) (err error) {
+
+	var (
+		repo           *git.Repository
+		registryFolder = path.Join(config.Workspace, "registry-root")
+	)
+
+	// open/clone and pull changes from the root repo
+	_, err = url.Parse(config.RegistryRoot)
+	utils.AbortIfError(err, "the registry root url is not a valid url: %s", config.RegistryRoot)
+
+	repo, err = gitwrap.CloneOrOpen(config.RegistryRoot, registryFolder, config.BasicAuth())
+	utils.AbortIfError(err, "aborted due to an error cloning registry fork repo: %v", err)
+
+	err = gitwrap.PullBranch(repo, config.RegistryRootBranch)
+	utils.AbortIfError(err, "error pulling changes for the %s branch: %v", config.RegistryRootBranch, err)
+
+	// ###  list the entries that the user owns
+	// read the the codeowners file
+	co, err := codeowners.FromFile(registryFolder)
+	utils.AbortIfError(err, "cannot find the CODEOWNERS file: %v", err)
+
+	// contains the path/chainIds to collect
+	chainIDs := []string{}
+	for _, p := range co.Patterns {
+		if matched, err := regexp.MatchString("[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*", p.Pattern); err != nil || !matched {
+			logger.Error("Invalid path [SKIPPED]", "pattern", p)
+			continue
+		}
+		if utils.ContainsStr(&p.Owners, &config.GitName) {
+			logger.Info("found path %s", p.Pattern)
+			// TODO: validate this path before appending it (eg. doesn't contains special chars like ../ and so on)
+			chainIDs = append(chainIDs, p.Pattern)
+		}
+	}
+
+	wg := sync.WaitGroup{}
+	// this are the actual nodes that we need to update
+	for _, cID := range chainIDs {
+		go func(rootFolder, chainID string) {
+			defer wg.Done()
+			peers, err := node.LoadPeers(rootFolder, chainID, config.RPCAddr, logger)
+			utils.AbortIfError(err, "failed to load peer info for chain ID %s: %v", chainID, err)
+			// load genesis checksum
+			checksum, err := node.LoadGenesisSum(rootFolder, chainID)
+			if err != nil {
+				logger.Error("permanent error: cannot retrieve the genesis checksum", "repo", rootFolder, "chain ID", chainID)
+				return
 			}
-			cloneOpts = &git.CloneOptions{
-				Auth:          authOpts,
-				URL:           config.RegistryRoot,
-				SingleBranch:  true,
-				ReferenceName: plumbing.NewBranchReferenceName(config.RegistryRootBranch),
-				Progress:      ioutil.Discard,
-			}
-			commitOpts = &git.CommitOptions{
-				Author: &object.Signature{
-					Name:  config.GitName,
-					Email: config.GitEmail,
-					When:  time.Now(),
-				},
-			}
-			pushOpts = &git.PushOptions{
-				Auth:     authOpts,
-				Progress: ioutil.Discard,
-			}
-		)
+			// contact all peers
+			node.RefreshPeers(peers, checksum)
+			// save the changes
+			node.SavePeers(rootFolder, chainID, peers, logger)
+			// commit and push
+			// now commit the changes
+			hash, err := gitwrap.CommitAndPush(repo,
+				config.GitName,
+				config.GitEmail,
+				fmt.Sprintf("updates for chain id %s", chainID),
+				time.Now(),
+				config.BasicAuth(),
+			)
+			utils.AbortIfError(err, "failed to update registry, please manually rollback the repo changes and try again")
+			logger.Info("chain ID update committed", "chainID", chainID, "commit hash", hash)
+		}(registryFolder, cID)
+	}
+	wg.Wait()
 
-		dir, err := ioutil.TempDir("", "registrar")
-		if err != nil {
-			return fmt.Errorf("creating temp directory: %s", err)
-		}
-		defer os.RemoveAll(dir)
-
-		logger.Info("cloning", "registry-repo", config.RegistryRoot, "tmpdir", dir)
-		if repo, err = git.PlainClone(dir, false, cloneOpts); err != nil {
-			return fmt.Errorf("cloning %s repository: %s", config.RegistryRoot, err)
-		}
-		if worktree, err = repo.Worktree(); err != nil {
-			return fmt.Errorf("creating git working tree: %s", err)
-		}
-
-		// dump node info
-		chainID, err := node.FetchChainID(config)
-		if err != nil {
-			return err
-		}
-		err = node.DumpInfo(dir, chainID, config, logger)
-		if err != nil {
-			return err
-		}
-		println("updating ", chainID)
-
-		st, err := worktree.Status()
-		if err != nil {
-			return err
-		}
-		for k := range st {
-			if _, err = worktree.Add(k); err != nil {
-				return err
-			}
-		}
-
-		msg := fmt.Sprintf("Push master [%s]: %s", config.ChainID, config.CommitMessage)
-		obj, err := worktree.Commit(msg, commitOpts)
-		if err != nil {
-			return fmt.Errorf("commiting changes on %s: %s", config.RegistryRoot, err)
-		}
-		if err = repo.Push(pushOpts); err != nil {
-			return fmt.Errorf("pushing to %s: %s", config.RegistryRoot, err)
-		}
-		logger.Info("committed changes", "repo", config.RegistryRoot, "commit", obj.String(), "message", msg)
-		return nil
-	},
+	return
 }
