@@ -1,6 +1,6 @@
 module github.com/jackzampolin/cosmos-registrar
 
-go 1.15
+go 1.16
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.2.7
@@ -10,7 +10,7 @@ require (
 	github.com/spf13/afero v1.5.1
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/viper v1.7.1
-	github.com/tendermint/tendermint v0.34.8
+	github.com/tendermint/tendermint v0.34.9
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
 	golang.org/x/text v0.3.5 // indirect
 	gopkg.in/yaml.v2 v2.3.0
