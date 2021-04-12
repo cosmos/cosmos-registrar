@@ -125,7 +125,11 @@ func StageToCommit(repo *git.Repository, path ...string) (err error) {
 }
 
 // CommitAndPush - shortcut for commit and push
+// name, email, date are for the user creating the commit singnature
+// message is the commit message
+// auth is for authentication to the remote for the pull
 func CommitAndPush(repo *git.Repository, name, email, message string, date time.Time, auth *http.BasicAuth) (hash string, err error) {
+
 	wt, err := repo.Worktree()
 	if err != nil {
 		return
@@ -143,9 +147,24 @@ func CommitAndPush(repo *git.Repository, name, email, message string, date time.
 		return
 	}
 	hash = commit.String()
-	err = repo.Push(&git.PushOptions{
-		Auth:     auth,
-		Progress: ProgressOutout,
-	})
+
+	// now try to push
+	for retries := 0; retries < 10; retries++ {
+		// pull first
+		err = wt.Pull(&git.PullOptions{RemoteName: "origin"})
+		if err != nil && err != git.NoErrAlreadyUpToDate {
+			return
+		}
+		err = repo.Push(&git.PushOptions{
+			Auth:     auth,
+			Progress: ProgressOutout,
+		})
+
+		switch err {
+		case nil, git.NoErrAlreadyUpToDate:
+			return
+		}
+	}
+
 	return
 }
