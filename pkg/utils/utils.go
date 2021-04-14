@@ -3,7 +3,6 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 )
 
@@ -18,9 +17,9 @@ func AbortIfError(err error, message string, v ...interface{}) {
 }
 
 // ContainsStr tells whenever a list of strring contains a specific string
-func ContainsStr(elements *[]string, needle *string) bool {
+func ContainsStr(elements *[]string, needle string) bool {
 	for _, s := range *elements {
-		if *needle == s {
+		if needle == s {
 			return true
 		}
 	}
@@ -29,19 +28,23 @@ func ContainsStr(elements *[]string, needle *string) bool {
 
 // FromJSON unmarshal a json file to an inferface
 func FromJSON(path string, v interface{}) (err error) {
-	pf, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("opening file: %s", err)
+		return
 	}
-	defer pf.Close()
-
-	pfb, err := ioutil.ReadAll(pf)
-	if err != nil {
-		return fmt.Errorf("reading file: %s", err)
-	}
-	if err = json.Unmarshal(pfb, &v); err != nil {
+	if err = json.Unmarshal(raw, v); err != nil {
 		return fmt.Errorf("unmarshaling data: %s", err)
 	}
+	return
+}
+
+// ToJSON write data to a json file
+func ToJSON(path string, data interface{}) (err error) {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	err = os.WriteFile(path, raw, 0x600)
 	return
 }
 

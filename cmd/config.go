@@ -68,7 +68,7 @@ func initConfig() {
 	//now read in the config
 	if err := viper.ReadInConfig(); err == nil {
 		viper.Unmarshal(config)
-		logger.Debug("Using config file at ", viper.ConfigFileUsed())
+		logger.Debug("Using config file at ", "config", viper.ConfigFileUsed())
 	} else {
 		switch err.(type) {
 		case viper.ConfigFileNotFoundError:
