@@ -45,14 +45,16 @@ func update(cmd *cobra.Command, args []string) (err error) {
 	co, err := codeowners.FromFile(registryFolder)
 	utils.AbortIfError(err, "cannot find the CODEOWNERS file: %v", err)
 
+	// TODO: move to config
+	repoPatternRgxp := regexp.MustCompile("[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*")
 	// contains the path/chainIds to collect
 	chainIDs := []string{}
 	for _, p := range co.Patterns {
-		if matched, err := regexp.MatchString("[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*", p.Pattern); err != nil || !matched {
+		if matched := repoPatternRgxp.MatchString(p.Pattern); !matched {
 			logger.Error("Invalid path [SKIPPED]", "pattern", p)
 			continue
 		}
-		if utils.ContainsStr(&p.Owners, &config.GitName) {
+		if utils.ContainsStr(&p.Owners, config.GitName) {
 			logger.Info("found path %s", p.Pattern)
 			// TODO: validate this path before appending it (eg. doesn't contains special chars like ../ and so on)
 			chainIDs = append(chainIDs, p.Pattern)
@@ -73,7 +75,7 @@ func update(cmd *cobra.Command, args []string) (err error) {
 				return
 			}
 			// contact all peers
-			node.RefreshPeers(peers, checksum)
+			node.RefreshPeers(peers, checksum, logger)
 			// save the changes
 			node.SavePeers(rootFolder, chainID, peers, logger)
 			// commit and push
@@ -86,7 +88,7 @@ func update(cmd *cobra.Command, args []string) (err error) {
 				config.BasicAuth(),
 			)
 			utils.AbortIfError(err, "failed to update registry, please manually rollback the repo changes and try again")
-			logger.Info("chain ID update committed", "chainID", chainID, "commit hash", hash)
+			logger.Info("chain ID update committed", "chainID", chainID, "commitHash", hash)
 		}(registryFolder, cID)
 	}
 	wg.Wait()

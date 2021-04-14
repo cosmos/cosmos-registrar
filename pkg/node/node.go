@@ -9,13 +9,12 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"strings"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
 	"github.com/tendermint/tendermint/libs/log"
-	"github.com/tendermint/tendermint/p2p"
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
@@ -24,11 +23,9 @@ import (
 )
 
 var (
-	gen     *ctypes.ResultGenesis
-	commit  *ctypes.ResultCommit
-	netInfo *ctypes.ResultNetInfo
-	rdir    repoDir
-	eg      errgroup.Group
+	gen    *ctypes.ResultGenesis
+	commit *ctypes.ResultCommit
+	eg     errgroup.Group
 )
 
 // Client returns a tendermint client to work against the configured chain
@@ -67,7 +64,7 @@ func FetchChainID(rpcAddress string) (chainID string, err error) {
 func LoadGenesisSum(basePath, chainID string) (sum string, err error) {
 	repoRoot := repoDir{basePath, chainID}
 	if !utils.PathExists(repoRoot.genesisSumPath()) {
-		err = fmt.Errorf("Path %s does not exists", repoRoot.genesisSumPath())
+		err = fmt.Errorf("path %s does not exists", repoRoot.genesisSumPath())
 		return
 	}
 	fp, err := os.Open(repoRoot.genesisSumPath())
@@ -95,6 +92,7 @@ func LoadPeers(basePath, chainID, rpcAddress string, logger log.Logger) (peers m
 	if err != nil {
 		return
 	}
+	peers = make(map[string]*Peer)
 	// map them to a map
 	for _, p := range peerList {
 		peers[p.ID] = &p
@@ -103,27 +101,53 @@ func LoadPeers(basePath, chainID, rpcAddress string, logger log.Logger) (peers m
 }
 
 func SavePeers(basePath, chainID string, peers map[string]*Peer, logger log.Logger) (err error) {
+	// sort the peer keys
+	peerKeys := make([]string, 0, len(peers))
+	for k := range peers {
+		peerKeys = append(peerKeys, k)
+	}
+	sort.Strings(peerKeys)
+	// create a slice of peers sorted by ID
+	peerData := make([]*Peer, 0, len(peerKeys))
+	for _, k := range peerKeys {
+		peerData = append(peerData, peers[k])
+	}
+	// write the list to disk
+	repoRoot := repoDir{basePath, chainID}
+	err = utils.ToJSON(repoRoot.peersPath(), peerData)
 	return
 }
 
-func RefreshPeers(peers map[string]*Peer, genesisSum string) (err error) {
+func RefreshPeers(peers map[string]*Peer, genesisSum string, logger log.Logger) (err error) {
 	// for each pear available
 	// in the list, contact the known peers
 	// and add them to the list
-	// TODO: do not use an errorgru
 	wg := sync.WaitGroup{}
 
 	for _, p := range peers {
 		go func(peer *Peer) {
+			defer wg.Done()
 			client, e := Client(p.Address)
 			ctx := context.Background()
+
 			if e != nil {
 				err = fmt.Errorf("error creating tendermint client: %s", err)
 				return
 			}
 			gen, err = client.Genesis(ctx)
 
-			wg.Done()
+			// TODO: in a more advanced version of this tool,
+			// this would crawl the network a couple of hops
+			// and find more peers
+
+			netInfo, err := client.NetInfo(ctx)
+			if err != nil {
+				return
+			}
+			logger.Debug("GET /net_info", "rpc-addr", p.Address)
+			for _, p := range netInfo.Peers {
+				fmt.Println(p)
+			}
 		}(p)
 		wg.Add(1)
 	}
@@ -168,21 +192,9 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		h := stat.SyncInfo.LatestBlockHeight
 		commit, err = client.Commit(ctx, &h)
 		if err != nil {
-			return fmt.Errorf("commit: %s", err)
+			return err
 		}
 		logger.Debug(fmt.Sprintf("GET /commit?height=%d", h), "rpc-addr", rpcAddress)
-		return nil
-	})
-
-	// TODO: in a more advanced version of this tool,
-	// this would crawl the network a couple of hops
-	// and find more peers
-	eg.Go(func() error {
-		netInfo, err = client.NetInfo(ctx)
-		if err != nil {
-			return fmt.Errorf("net-info: %s", err)
-		}
-		logger.Debug("GET /net_info", "rpc-addr", rpcAddress)
 		return nil
 	})
 
@@ -191,29 +203,29 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		return
 	}
 	// fetch data
-	rdir := repoDir{basePath, chainID}
-	if err = createDirIfNotExist(rdir.chainPath(), logger); err != nil {
+	repoRoot := repoDir{basePath, chainID}
+	if err = createDirIfNotExist(repoRoot.chainPath(), logger); err != nil {
 		return
 	}
-	if err = createDirIfNotExist(rdir.lrpath(), logger); err != nil {
+	if err = createDirIfNotExist(repoRoot.lrpath(), logger); err != nil {
 		return
 	}
 	// TODO: sanity checks on the genesis file returned from the chain compared with repo
-	eg.Go(updateFileGo(rdir.latestPath(), NewLightRoot(commit.SignedHeader), logger))
-	eg.Go(updateFileGo(rdir.heightPath(commit.SignedHeader.Header.Height), NewLightRoot(commit.SignedHeader), logger))
+	eg.Go(updateFileGo(repoRoot.latestPath(), NewLightRoot(commit.SignedHeader), logger))
+	eg.Go(updateFileGo(repoRoot.heightPath(commit.SignedHeader.Header.Height), NewLightRoot(commit.SignedHeader), logger))
 	// TODO: not sure about this one, but we should be able to get the node version from the rpc
-	// eg.Go(updateFileGo(rdir.binariesPath(), config.Binary(), logger))
+	// eg.Go(updateFileGo(repoRoot.binariesPath(), config.Binary(), logger))
 	eg.Go(func() error {
-		if _, err = os.Stat(rdir.genesisPath()); os.IsNotExist(err) {
+		if _, err = os.Stat(repoRoot.genesisPath()); os.IsNotExist(err) {
 			sum, write, err := sortedGenesis(gen.Genesis)
 			if err != nil {
 				return fmt.Errorf("sorting genesis file: %s", err)
 			}
 
-			if err = writeFile(rdir.genesisSumPath(), []byte(sum), logger); err != nil {
+			if err = writeFile(repoRoot.genesisSumPath(), []byte(sum), logger); err != nil {
 				return err
 			}
-			if err = writeFile(rdir.genesisPath(), write, logger); err != nil {
+			if err = writeFile(repoRoot.genesisPath(), write, logger); err != nil {
 				return err
 			}
 		}
@@ -234,7 +246,7 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		if err != nil {
 			return fmt.Errorf("marshaling peers: %s", err)
 		}
-		return writeFile(rdir.peersPath(), out, logger)
+		return writeFile(repoRoot.peersPath(), out, logger)
 	})
 
 	err = eg.Wait()
@@ -243,13 +255,13 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 
 // Peer structure to keep track of the status of a peer
 type Peer struct {
-	ID                string
-	Address           string
-	IsSeed            bool
-	LastContactHeight int64
-	LastContactDate   time.Time
-	UpdatedAt         time.Time
-	Reachable         bool
+	ID                string    `json:"id,omitempty"`
+	Address           string    `json:"address,omitempty"`
+	IsSeed            bool      `json:"is_seed,omitempty"`
+	LastContactHeight int64     `json:"last_contact_height,omitempty"`
+	LastContactDate   time.Time `json:"last_contact_date,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+	Reachable         bool      `json:"reachable,omitempty"`
 }
 
 type repoDir struct {
@@ -263,8 +275,8 @@ func (r repoDir) genesisSumPath() string    { return path.Join(r.chainPath(), "g
 func (r repoDir) lrpath() string            { return path.Join(r.chainPath(), "light-roots") }
 func (r repoDir) latestPath() string        { return path.Join(r.lrpath(), "latest.json") }
 func (r repoDir) heightPath(h int64) string { return path.Join(r.lrpath(), fmt.Sprintf("%d.json", h)) }
-func (r repoDir) binariesPath() string      { return path.Join(r.chainPath(), "binaries.json") }
-func (r repoDir) peersPath() string         { return path.Join(r.chainPath(), "peers.json") }
+
+func (r repoDir) peersPath() string { return path.Join(r.chainPath(), "peers.json") }
 
 func updateFileGo(pth string, payload []byte, log log.Logger) func() error {
 	return func() (err error) {
@@ -294,23 +306,6 @@ func createDirIfNotExist(pth string, log log.Logger) (err error) {
 		}
 	}
 	return nil
-}
-
-func stringsFromPeers(ni []ctypes.Peer) (qp []string) {
-	for _, p := range ni {
-		port := strings.Split(p.NodeInfo.ListenAddr, ":")
-		qp = append(qp, nodeCoordinatesToStr(p.NodeInfo.ID(), p.RemoteIP, port[len(port)-1]))
-	}
-	return
-}
-
-// stringify a node rpc address and id
-func nodeCoordinatesToStr(id p2p.ID, ip, port string) string {
-	if port == "" {
-		// avoid having a blank port
-		port = "26657"
-	}
-	return fmt.Sprintf("%s@%s:%s", id, ip, port)
 }
 
 func sortedGenesis(gen *tmtypes.GenesisDoc) (sum string, indented []byte, err error) {
@@ -349,16 +344,4 @@ func NewLightRoot(sh tmtypes.SignedHeader) []byte {
 		TrustHash:   sh.Commit.BlockID.Hash.String(),
 	}, "", "  ")
 	return out
-}
-
-// remove duplicate elements in a list of strings
-func dedupe(ele []string) (out []string) {
-	e := map[string]bool{}
-	for v := range ele {
-		e[ele[v]] = true
-	}
-	for k := range e {
-		out = append(out, k)
-	}
-	return
 }
