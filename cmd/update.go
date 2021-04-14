@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,16 +55,16 @@ func update(cmd *cobra.Command, args []string) (err error) {
 			logger.Error("Invalid path [SKIPPED]", "pattern", p)
 			continue
 		}
-		if utils.ContainsStr(&p.Owners, config.GitName) {
-			logger.Info("found path %s", p.Pattern)
+		if utils.ContainsStr(&p.Owners, fmt.Sprint("@", config.GitName)) {
+			logger.Info("found match", "pattern", p.Pattern, "git username", config.GitName)
 			// TODO: validate this path before appending it (eg. doesn't contains special chars like ../ and so on)
-			chainIDs = append(chainIDs, p.Pattern)
+			chainIDs = append(chainIDs, strings.Trim(p.Pattern, "/"))
 		}
 	}
-
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	// this are the actual nodes that we need to update
 	for _, cID := range chainIDs {
+		wg.Add(1)
 		go func(rootFolder, chainID string) {
 			defer wg.Done()
 			peers, err := node.LoadPeers(rootFolder, chainID, config.RPCAddr, logger)

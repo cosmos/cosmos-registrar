@@ -269,7 +269,7 @@ type repoDir struct {
 	chainID string
 }
 
-func (r repoDir) chainPath() string         { return path.Join(r.dir) }
+func (r repoDir) chainPath() string         { return path.Join(r.dir, r.chainID) }
 func (r repoDir) genesisPath() string       { return path.Join(r.chainPath(), "genesis.json") }
 func (r repoDir) genesisSumPath() string    { return path.Join(r.chainPath(), "genesis.json.sum") }
 func (r repoDir) lrpath() string            { return path.Join(r.chainPath(), "light-roots") }
