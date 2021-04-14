@@ -26,4 +26,9 @@ install: go.sum
 	@echo "installing registrar binary..."
 	@go build -mod=readonly $(BUILD_FLAGS) -o $${GOBIN-$${GOPATH-$$HOME/go}/bin}/registrar main.go
 
+test:
+	$(eval GOPACKAGES = $(shell go list ./...  | grep -v /vendor/))
+	@go test $(GOPACKAGES) -v -race -coverprofile=cover.out -covermode=atomic
+
+
 .PHONY: install build lint coverage clean
