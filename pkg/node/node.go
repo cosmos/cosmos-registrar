@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -177,6 +178,14 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		return
 	default:
 		logger.Debug("GET /status", "rpc-addr", rpcAddress)
+	}
+
+	old, err := regexp.MatchString("[0-9].3[0-3]*", stat.NodeInfo.Version)
+	if err != nil {
+		return fmt.Errorf("error checking tendermint version: %s", err)
+	}
+	if old {
+		return fmt.Errorf("cosmos-registrar only supports nodes with tendermint version 0.34 and up, this node is running %s", stat.NodeInfo.Version)
 	}
 
 	eg.Go(func() error {
