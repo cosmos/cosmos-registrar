@@ -1,108 +1,162 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"path"
 
+	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
+	"github.com/jackzampolin/cosmos-registrar/pkg/gitwrap"
+	"github.com/jackzampolin/cosmos-registrar/pkg/prompts"
+	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
-	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
-	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
-	"gopkg.in/yaml.v2"
+	"github.com/spf13/viper"
+	"github.com/tendermint/tendermint/libs/log"
 )
 
+func init() {
+	// Set Defaults
+	// viper.SetDefault("rpc-addr", "http://localhost:26657")
+	// viper.SetDefault("chain-id", "cosmoshub-3")
+
+	// TODO how to get this data? can it be retrieved or shall be asked to the user?
+	// Asking to the user may result in not being a reliable info
+	// viper.SetDefault("build-repo", "https://github.com/cosmos/gaia")
+	// viper.SetDefault("build-command", "gaiad")
+	// viper.SetDefault("binary-name", "make install")
+	// viper.SetDefault("build-version", "v2.0.13")
+
+	viper.SetDefault("github-access-token", "get yours at https://github.com/settings/tokens")
+	viper.SetDefault("registry-root", "https://github.com/apeunit/registry")
+	viper.SetDefault("registry-fork-name", "registry")
+	viper.SetDefault("registry-root-branch", "main")
+	viper.SetDefault("git-name", "Your name goes here")
+	viper.SetDefault("git-email", "your@email.here")
+	// viper.SetDefault("commit-message", "update roots of trust")
+}
+
 // initConfig reads in config file and ENV variables if set.
-func initConfig(cmd *cobra.Command) (err error) {
-	config = &Config{}
-	if _, err = os.Stat(cfgFile); err == nil {
-		file, err := ioutil.ReadFile(cfgFile)
-		if err != nil {
-			return fmt.Errorf("Error reading config: %s", err)
+func initConfig() {
+	if !debug {
+		log.AllowLevel("debug")
+	}
+
+	config = &registrar.Config{}
+	configPath, err := os.UserConfigDir()
+	if err != nil {
+		// TODO handle this
+		panic("cannot retrieve the user configuration directory")
+	}
+	defaultCfgPath := path.Join(configPath, "cosmos", "registry")
+	afero.NewOsFs().MkdirAll(defaultCfgPath, 0700)
+
+	viper.SetConfigType("yaml")
+
+	if cfgFile != "" {
+		// Use config file from the flag.
+		viper.SetConfigFile(cfgFile)
+	} else {
+		viper.AddConfigPath(defaultCfgPath)
+		viper.SetConfigName("config")
+	}
+
+	// set the workspace folder
+	cfgFilePath := viper.ConfigFileUsed()
+	if cfgFilePath == "" {
+		cfgFilePath = path.Join(defaultCfgPath, "config.yaml")
+	}
+	//now read in the config
+	if err := viper.ReadInConfig(); err == nil {
+		viper.Unmarshal(config)
+		logger.Debug("Using config file at ", "config", viper.ConfigFileUsed())
+	} else {
+		switch err.(type) {
+		case viper.ConfigFileNotFoundError:
+			if noInteraction {
+				println("config file not found")
+				os.Exit(1)
+			}
+			if err = interactiveSetup(); err != nil {
+				println("unexpected error ", err.Error())
+				os.Exit(1)
+			}
+			viper.Unmarshal(config)
+			println("\nThe configuration is:")
+			prompts.PrettyMap(viper.AllSettings())
+			println()
+			if ok := prompts.Confirm(false, "save the configuration?"); !ok {
+				println("aborting, run the command again to change the configuration")
+				os.Exit(0)
+			}
+
+			if err = viper.WriteConfigAs(cfgFilePath); err != nil {
+				println("aborting, error writing the configuration file:", err.Error())
+				os.Exit(1)
+			}
+			println("config file saved in ", cfgFilePath)
+
+		default:
+			println("the configuration file appers corrupted: ", err.Error())
+			os.Exit(1)
 		}
-		if err = yaml.Unmarshal(file, config); err != nil {
-			return fmt.Errorf("Error unmarshalling config: %s", err)
-		}
-		return nil
 	}
-	fmt.Println("no config file", cfgFile)
-	return nil
+	// set the config workspace folder
+	config.Workspace = path.Dir(cfgFilePath)
 }
 
-// Config represents the configuration for the given application
-type Config struct {
-	RPCAddr            string `json:"rpc-addr" yaml:"rpc-addr"`
-	ChainID            string `json:"chain-id" yaml:"chain-id"`
-	BuildRepo          string `json:"build-repo" yaml:"build-repo"`
-	BuildCommand       string `json:"build-command" yaml:"build-command"`
-	BinaryName         string `json:"binary-name" yaml:"binary-name"`
-	BuildVersion       string `json:"build-version" yaml:"build-version"`
-	GithubAccessToken  string `json:"github-access-token" yaml:"github-access-token"`
-	RegistryRepo       string `json:"registry-repo" yaml:"registry-repo"`
-	RegistryRepoBranch string `json:"registry-repo-branch" yaml:"registry-repo-branch"`
-	GitName            string `json:"git-name" yaml:"git-name"`
-	GitEmail           string `json:"git-email" yaml:"git-email"`
-	CommitMessage      string `json:"commit-message" yaml:"commit-message"`
-}
+// Setup guides the user to setup their environmant
+func interactiveSetup() (err error) {
+	println(`
+Welcome to the Cosmos registry tool. 
+This tool will allow you to publicly claim a Chain ID 
+for your cosmos based chain.
 
-// Binary returns the binary file representation from the config
-func (c *Config) Binary() []byte {
-	// TODO: ensure this is sorted?
-	out, _ := json.MarshalIndent(&Binary{
-		Name:    c.BinaryName,
-		Repo:    c.BuildRepo,
-		Build:   c.BuildCommand,
-		Version: c.BuildVersion,
-	}, "", "  ")
-	return out
-}
+To complete the setup you need a GitHub account and 
+network connectivity to a node of your chain.
+`)
+	// ask to start
+	if goOn := prompts.Confirm(true, "do you have them available"); !goOn {
+		println("please make sure you get them and the run the setup again")
+		os.Exit(0)
+	}
 
-// Client returns a tendermint client to work against the configured chain
-func (c *Config) Client() (*rpchttp.HTTP, error) {
-	httpClient, err := libclient.DefaultHTTPClient(c.RPCAddr)
+	user, email := gitwrap.GetGlobalGitIdentity()
+
+	// next get the git user
+	gitName, err := prompts.InputOrDefault(user, "enter your git username")
 	if err != nil {
-		return nil, err
+		println(err.Error())
+		os.Exit(1)
 	}
+	viper.Set("git-name", gitName)
 
-	rpcClient, err := rpchttp.NewWithClient(c.RPCAddr, "/websocket", httpClient)
+	// next get the git email
+	gitEmail, err := prompts.InputOrDefault(email, "enter your git email")
 	if err != nil {
-		return nil, err
+		println(err.Error())
+		os.Exit(1)
 	}
+	viper.Set("git-email", gitEmail)
 
-	return rpcClient, nil
-}
+	// now get the github token
+	println(`
+The next step is to enter a github personal token for your account , 
+if you don't have one you can get it from
 
-// YAML converts the config into yaml bytes
-func (c *Config) YAML() ([]byte, error) {
-	return yaml.Marshal(c)
-}
+https://github.com/settings/tokens
 
-// MustYAML converts to yaml bytes panicing on error
-func (c *Config) MustYAML() []byte {
-	out, err := c.YAML()
+(make sure that you select the permission repo > public_repo)
+`)
+
+	token, err := prompts.Password("%s personal token", gitName)
 	if err != nil {
-		panic(err)
+		println(err.Error())
+		os.Exit(1)
 	}
-	return out
-}
+	viper.Set("github-access-token", token)
 
-func defaultConfig() []byte {
-	c := &Config{
-		RPCAddr:            "http://localhost:26657",
-		ChainID:            "cosmoshub-3",
-		BuildRepo:          "https://github.com/cosmos/gaia",
-		BinaryName:         "gaiad",
-		BuildCommand:       "make install",
-		BuildVersion:       "v2.0.13",
-		GithubAccessToken:  "get yours at https://github.com/settings/tokens",
-		RegistryRepo:       "https://github.com/jackzampolin/registry",
-		RegistryRepoBranch: "main",
-		GitName:            "Your name goes here",
-		GitEmail:           "your@email.here",
-		CommitMessage:      "update roots of trust",
-	}
-	config = c
-	return c.MustYAML()
+	println("the setup is now completed")
+	return
 }
 
 func configCmd() *cobra.Command {
@@ -122,26 +176,20 @@ func configCmd() *cobra.Command {
 	return cmd
 }
 
-// Command for inititalizing an empty config at the --home location
+// Command for initializing an empty config at the --home location
 func configInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "init",
 		Aliases: []string{"i"},
 		Short:   "Creates a default home directory at path defined by --home",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := os.Stat(cfgFile); os.IsNotExist(err) {
-				f, err := os.Create(cfgFile)
-				if err != nil {
-					return err
-				}
-				defer f.Close()
-				if _, err = f.Write(defaultConfig()); err != nil {
-					return err
-				}
-				fmt.Printf("Created config(%s)\n", cfgFile)
-				return nil
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+
+			err = viper.SafeWriteConfig()
+			if err != nil {
+				fmt.Printf("error saving config(%s): %v", viper.ConfigFileUsed(), err)
 			}
-			return fmt.Errorf("config(%s) already exists", cfgFile)
+			return
+
 		},
 	}
 	return cmd
@@ -153,14 +201,17 @@ func configDeleteCmd() *cobra.Command {
 		Aliases: []string{"d"},
 		Short:   "delete the config file at path --config",
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			if _, err = os.Stat(cfgFile); os.IsNotExist(err) {
+			if viper.ConfigFileUsed() == "" {
+				return fmt.Errorf("config doesn't exist")
+			}
+			if _, err = os.Stat(viper.ConfigFileUsed()); os.IsNotExist(err) {
 				return fmt.Errorf("config(%s) doesn't exist", cfgFile)
 			}
-			if err = os.Remove(cfgFile); err != nil {
+			if err = os.Remove(viper.ConfigFileUsed()); err != nil {
 				return fmt.Errorf("error deleting config(%s)", err)
 			}
 			fmt.Printf("Removed config(%s)\n", cfgFile)
-			return nil
+			return
 		},
 	}
 	return cmd
@@ -172,10 +223,10 @@ func configShowCmd() *cobra.Command {
 		Aliases: []string{"s"},
 		Short:   "print existing config",
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			if _, err = os.Stat(cfgFile); os.IsNotExist(err) {
-				return fmt.Errorf("config(%s) doesn't exist", cfgFile)
+			if viper.ConfigFileUsed() == "" {
+				return fmt.Errorf("config doesn't exist")
 			}
-			fmt.Print(string(config.MustYAML()))
+			prompts.PrettyMap(viper.AllSettings())
 			return nil
 		},
 	}
@@ -218,13 +269,13 @@ func configEditCmd() *cobra.Command {
 				// TODO: validate
 				config.GithubAccessToken = args[1]
 				return overwriteConfig(cmd, config)
-			case "registry-repo":
+			case "registry-fork-name":
 				// TODO: validate
-				config.RegistryRepo = args[1]
+				config.RegistryForkName = args[1]
 				return overwriteConfig(cmd, config)
-			case "registry-repo-branch":
+			case "registry-root-branch":
 				// TODO: validate
-				config.RegistryRepoBranch = args[1]
+				config.RegistryRootBranch = args[1]
 				return overwriteConfig(cmd, config)
 			case "git-name":
 				// TODO: validate
@@ -246,17 +297,6 @@ func configEditCmd() *cobra.Command {
 	return cmd
 }
 
-func overwriteConfig(cmd *cobra.Command, cfg *Config) (err error) {
-	if _, err = os.Stat(cfgFile); err == nil {
-		out, err := yaml.Marshal(cfg)
-		if err != nil {
-			return err
-		}
-		err = ioutil.WriteFile(cfgFile, out, 0600)
-		if err != nil {
-			return err
-		}
-		config = cfg
-	}
-	return nil
+func overwriteConfig(cmd *cobra.Command, cfg *registrar.Config) (err error) {
+	return viper.WriteConfig()
 }

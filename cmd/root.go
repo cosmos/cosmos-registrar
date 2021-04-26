@@ -17,28 +17,34 @@ limitations under the License.
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/tendermint/tendermint/libs/log"
 
-	"github.com/spf13/viper"
+	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
+	"github.com/jackzampolin/cosmos-registrar/pkg/prompts"
 )
 
 var (
-	cfgFile    string
-	config     *Config
-	cfgFlag    = "config"
-	defaultCfg = os.ExpandEnv("$HOME/.registrar.yaml")
+	cfgFile       string
+	debug         bool
+	config        *registrar.Config
+	logger        = log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+	noInteraction = false
 )
 
 func init() {
+	cobra.OnInitialize(initConfig)
+
 	cobra.EnableCommandSorting = false
 	rootCmd.SilenceUsage = true
-	rootCmd.PersistentFlags().StringVar(&cfgFile, cfgFlag, defaultCfg, "config file (default is $HOME/.registrar.yaml)")
-	if err := viper.BindPFlag(cfgFlag, rootCmd.Flags().Lookup(cfgFlag)); err != nil {
-		panic(err)
-	}
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file")
+
+	rootCmd.Flags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
+	rootCmd.Flags().BoolVarP(&noInteraction, "no-interactive", "y", false, "Run commands non interactively")
+
 	rootCmd.AddCommand(
 		configCmd(),
 		updateCmd,
@@ -49,16 +55,58 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "registrar",
 	Short: "registers data aiding in chain service discovery (peers seeds etc...) in github repo",
+	Run:   interact,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	// reads `.registrar.yaml` into `var config *Config` before each command
-	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
-		return initConfig(rootCmd)
-	}
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func interact(cmd *cobra.Command, args []string) {
+
+	for {
+		prompts.Select("what shall we do today?",
+			prompts.NewOption("Register a new ChainID", func() (err error) {
+				// ask use to create a fork first
+				println(`
+Good choice, following this process you will submit a 
+pull request to the chain IDs registry hosted on GitHub:
+
+` + config.RegistryRoot + `
+
+The first step is to create a fork of the registry using this link:
+
+` + fmt.Sprintf("%s/fork", config.RegistryRoot) + `
+`)
+
+				if ok := prompts.Confirm(true, "Go ahead and confirm when you have done so"); !ok {
+					println("please create the fork before continuing")
+					return
+				}
+				println(`
+Next enter the rpc url for a node of your network  
+eg http://10.0.0.1:26657
+`)
+				// TODO add rpc address prompt
+				rpc, err := prompts.InputRequired("rpc address")
+
+				claim(cmd, []string{rpc})
+				return
+			}),
+			prompts.NewOption("Update a Chain ID you control", func() (err error) {
+				println("coming soon")
+				return
+			}),
+			prompts.NewOption("Exit", func() (err error) {
+				println("goodbye!")
+				os.Exit(0)
+				return
+			}),
+		)
+	}
+
 }
