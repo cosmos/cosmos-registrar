@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -179,6 +180,14 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		logger.Debug("GET /status", "rpc-addr", rpcAddress)
 	}
 
+	old, err := regexp.MatchString("[0-9].3[0-3]*", stat.NodeInfo.Version)
+	if err != nil {
+		return fmt.Errorf("error checking tendermint version: %s", err)
+	}
+	if old {
+		return fmt.Errorf("cosmos-registrar only supports nodes with tendermint version 0.34 and up, this node is running %s", stat.NodeInfo.Version)
+	}
+
 	eg.Go(func() error {
 		gen, err = client.Genesis(ctx)
 		if err != nil {
@@ -269,7 +278,7 @@ type repoDir struct {
 	chainID string
 }
 
-func (r repoDir) chainPath() string         { return path.Join(r.dir) }
+func (r repoDir) chainPath() string         { return path.Join(r.dir, r.chainID) }
 func (r repoDir) genesisPath() string       { return path.Join(r.chainPath(), "genesis.json") }
 func (r repoDir) genesisSumPath() string    { return path.Join(r.chainPath(), "genesis.json.sum") }
 func (r repoDir) lrpath() string            { return path.Join(r.chainPath(), "light-roots") }

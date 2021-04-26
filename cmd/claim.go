@@ -40,10 +40,10 @@ const (
 
 // claimCmd represents the claim command
 var claimCmd = &cobra.Command{
-	Use:   "claim",
+	Use:   "claim RPC_ADDRESS",
 	Short: "Claim a name for a cosmos based chain",
-	Long: `This command allows you to submit a claim request for 
-a name for you chain.`,
+	Long: `This command allows you to submit a claim request for
+a name for your chain.`,
 	Run:  claim,
 	Args: cobra.ExactArgs(1),
 }
@@ -151,7 +151,7 @@ the main registry's repository following this link:
 `)
 	println(prURL)
 	println(`
-Once your pull request will be reviewed you will be notified 
+Once your pull request will be reviewed you will be notified
 of the results.
 `)
 	if ok := prompts.Confirm(false, "Do you want to continue?"); !ok {
