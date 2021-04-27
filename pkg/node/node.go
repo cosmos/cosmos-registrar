@@ -180,7 +180,7 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		logger.Debug("GET /status", "rpc-addr", rpcAddress)
 	}
 
-	old, err := regexp.MatchString("[0-9].3[0-3]*", stat.NodeInfo.Version)
+	old, err := regexp.MatchString("v0.3[0-3]", stat.NodeInfo.Version)
 	if err != nil {
 		return fmt.Errorf("error checking tendermint version: %s", err)
 	}
