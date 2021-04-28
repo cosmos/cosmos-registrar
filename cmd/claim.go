@@ -104,7 +104,7 @@ func claim(cmd *cobra.Command, args []string) {
 	// TODO check if the branch exits
 	println("checking out branch ", claimName)
 	err = gitwrap.CreateBranch(repo, claimName)
-	utils.AbortIfError(err, "cannot create branch: %v", err)
+	utils.AbortCleanupIfError(err, "cannot create branch: %v", forkRepoFolder, err)
 
 	// add a subfolder `claimName`
 	claimPath := path.Join(forkRepoFolder, claimName)
@@ -139,7 +139,7 @@ func claim(cmd *cobra.Command, args []string) {
 		commitMsg,
 		time.Now(),
 		config.BasicAuth())
-	utils.AbortIfError(err, "git push error : %v", err)
+	utils.AbortCleanupIfError(err, "git push error : %v; this usually means in your forked registry remote repo, there is already a branch with the same name", forkRepoFolder, err)
 	println("changes committed with hash", commit)
 
 	// open the github page to submit the PR to mainRepo

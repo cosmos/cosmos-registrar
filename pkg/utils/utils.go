@@ -6,6 +6,19 @@ import (
 	"os"
 )
 
+// AbortCleanupIfError attempts to clean up the specified path in the
+// configuration workspace, then runs AbortIfError
+func AbortCleanupIfError(err error, message string, path string, v ...interface{}) {
+	if err == nil {
+		return
+	}
+	if PathExists(path) {
+		fmt.Println("Cleaning up", path)
+		os.RemoveAll(path)
+	}
+	AbortIfError(err, message, v)
+}
+
 // AbortIfError abort command if there is an error
 func AbortIfError(err error, message string, v ...interface{}) {
 	if err == nil {
