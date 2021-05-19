@@ -115,7 +115,7 @@ func claim(cmd *cobra.Command, args []string) {
 	// fetch the chain data
 	err = node.DumpInfo(claimPath, claimName, rpcAddress, logger)
 	println("fetching chain data")
-	utils.AbortIfError(err, "error connecting to the node at %s: %v", rpcAddress, err)
+	utils.AbortCleanupIfError(err, fmt.Sprintf("error connecting to the node at %s: %v", rpcAddress, err), forkRepoFolder, err)
 
 	println("starting claiming process for", claimName)
 	// add rule to the codeowner
