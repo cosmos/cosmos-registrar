@@ -187,6 +187,9 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 	if old {
 		return fmt.Errorf("cosmos-registrar only supports nodes with tendermint version 0.34 and up, this node is running %s", stat.NodeInfo.Version)
 	}
+	if stat.NodeInfo.Version == "" {
+		logger.Info("Node did not report its Tendermint version, there may be compatibility problems")
+	}
 
 	eg.Go(func() error {
 		gen, err = client.Genesis(ctx)
