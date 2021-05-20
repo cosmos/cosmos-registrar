@@ -15,6 +15,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -246,7 +247,7 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 			if err = writeFile(repoRoot.genesisSumPath(), []byte(sum), logger); err != nil {
 				return err
 			}
-			if err = writeFile(repoRoot.genesisPath(), write, logger); err != nil {
+			if err = writeGzFile(repoRoot.genesisPath(), write, logger); err != nil {
 				return err
 			}
 		}
@@ -316,6 +317,23 @@ func writeFile(pth string, payload []byte, log log.Logger) (err error) {
 	if err = ioutil.WriteFile(pth, payload, 0644); err != nil {
 		return fmt.Errorf("writing %s: %s", pth, err)
 	}
+	return nil
+}
+
+func writeGzFile(pth string, payload []byte, log log.Logger) (err error) {
+	pth = strings.Join([]string{pth, ".gz"}, "")
+	log.Debug(fmt.Sprintf("writing path %s", path.Base(pth)))
+	f, err := os.Create(pth)
+	if err != nil {
+		return
+	}
+
+	zw := gzip.NewWriter(f)
+	_, err = zw.Write(payload)
+	if err != nil {
+		return fmt.Errorf("writing %s: %s", pth, err)
+	}
+	defer zw.Close()
 	return nil
 }
 
