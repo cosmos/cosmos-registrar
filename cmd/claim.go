@@ -30,7 +30,6 @@ import (
 	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
 	"github.com/noandrea/go-codeowners"
 
-	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +62,6 @@ func claim(cmd *cobra.Command, args []string) {
 	)
 
 	utils.AbortIfError(err, "error fetching the chain ID: %v", err)
-	fs := afero.NewOsFs()
 
 	// check if root url is valid
 	_, err = url.Parse(config.RegistryRoot)
@@ -106,14 +104,8 @@ func claim(cmd *cobra.Command, args []string) {
 	err = gitwrap.CreateBranch(repo, claimName)
 	utils.AbortCleanupIfError(err, "cannot create branch: %v", forkRepoFolder, err)
 
-	// add a subfolder `claimName`
-	claimPath := path.Join(forkRepoFolder, claimName)
-	err = fs.Mkdir(claimPath, 0700)
-	println("creating chain folder for", claimName)
-	utils.AbortIfError(err, "cannot create claim folder: %v", err)
-
 	// fetch the chain data
-	err = node.DumpInfo(claimPath, claimName, rpcAddress, logger)
+	err = node.DumpInfo(forkRepoFolder, claimName, rpcAddress, logger)
 	println("fetching chain data")
 	utils.AbortCleanupIfError(err, fmt.Sprintf("error connecting to the node at %s: %v", rpcAddress, err), forkRepoFolder, err)
 
