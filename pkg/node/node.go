@@ -1,8 +1,12 @@
 package node
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +23,7 @@ import (
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
+	"github.com/tendermint/tendermint/types"
 	tmtypes "github.com/tendermint/tendermint/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -192,7 +197,11 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 	}
 
 	eg.Go(func() error {
-		gen, err = client.Genesis(ctx)
+		if stat.NodeInfo.Network == "cosmoshub-4" {
+			gen, err = cosmoshub4Workaround(ctx, client)
+		} else {
+			gen, err = client.Genesis(ctx)
+		}
 		if err != nil {
 			return fmt.Errorf("genesis file: %s", err)
 		}
@@ -339,6 +348,73 @@ func sortedGenesis(gen *tmtypes.GenesisDoc) (sum string, indented []byte, err er
 
 	// sum
 	sum = fmt.Sprintf("%x", sha256.Sum256(indented))
+	return
+}
+
+// cosmoshub4Workaround is a workaround for not being able to get cosmoshub-4's
+// genesis from a node, because it is too large (problem with tendermint 0.34,
+// should be fixed with 0.35)
+func cosmoshub4Workaround(ctx context.Context, client *rpchttp.HTTP) (gen *ctypes.ResultGenesis, err error) {
+	expected := []struct {
+		Height  int64
+		AppHash string
+	}{
+		{5200791, "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"},
+		{6000000, "DCBA58D3825AE20BA8FA836AAF386497D8D18A837F4B06D51D67BD372763D4FB"},
+		{6282992, "101FCD443AAEDDE4904971810EC08EF44CA06C490E8C520483E02A55C6987FF7"},
+	}
+	for _, e := range expected {
+		commit, err := client.Commit(ctx, &e.Height)
+		if err != nil {
+			return nil, err
+		}
+
+		if commit.Header.AppHash.String() != e.AppHash {
+			return nil, fmt.Errorf("height %b had app hash %s, expected %s", e.Height, commit.Header.AppHash.String(), e.AppHash)
+		}
+	}
+
+	// Find and verify genesis.cosmoshub-4.json.gz in the current folder
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	println("cosmoshub4Workaround: looking for genesis.cosmoshub-4.json.gz in", dir)
+	gPath := path.Join(dir, "genesis.cosmoshub-4.json.gz")
+	f, err := os.Open(gPath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	b, err := ioutil.ReadAll(f) // so we can read the file contents twice
+
+	hReader := bytes.NewReader(b)
+	h := md5.New()
+	if _, err := io.Copy(h, hReader); err != nil {
+		return nil, err
+	}
+	hActual := hex.EncodeToString(h.Sum(nil))
+	hExpected := "a4216a3cae68e9190d0757c90bcb1f1b"
+	if string(hActual) != hExpected {
+		return nil, fmt.Errorf("%s has md5 of %s, expected %s", gPath, hActual, hExpected)
+	}
+
+	gzReader := bytes.NewReader(b)
+	gr, err := gzip.NewReader(gzReader)
+	if err != nil {
+		return
+	}
+	defer gr.Close()
+
+	j, err := ioutil.ReadAll(gr)
+	if err != nil {
+		return
+	}
+	gDoc, err := types.GenesisDocFromJSON(j)
+	if err != nil {
+		return
+	}
+	gen = &ctypes.ResultGenesis{Genesis: gDoc}
 	return
 }
 
