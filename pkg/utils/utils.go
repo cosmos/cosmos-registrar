@@ -8,7 +8,7 @@ import (
 
 // AbortCleanupIfError attempts to clean up the specified path in the
 // configuration workspace, then runs AbortIfError
-func AbortCleanupIfError(err error, message string, path string, v ...interface{}) {
+func AbortCleanupIfError(err error, path string, message string, v ...interface{}) {
 	if err == nil {
 		return
 	}
