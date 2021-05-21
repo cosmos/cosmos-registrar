@@ -30,7 +30,6 @@ import (
 	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
 	"github.com/noandrea/go-codeowners"
 
-	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +62,6 @@ func claim(cmd *cobra.Command, args []string) {
 	)
 
 	utils.AbortIfError(err, "error fetching the chain ID: %v", err)
-	fs := afero.NewOsFs()
 
 	// check if root url is valid
 	_, err = url.Parse(config.RegistryRoot)
@@ -104,18 +102,12 @@ func claim(cmd *cobra.Command, args []string) {
 	// TODO check if the branch exits
 	println("checking out branch ", claimName)
 	err = gitwrap.CreateBranch(repo, claimName)
-	utils.AbortCleanupIfError(err, "cannot create branch: %v", forkRepoFolder, err)
-
-	// add a subfolder `claimName`
-	claimPath := path.Join(forkRepoFolder, claimName)
-	err = fs.Mkdir(claimPath, 0700)
-	println("creating chain folder for", claimName)
-	utils.AbortIfError(err, "cannot create claim folder: %v", err)
+	utils.AbortCleanupIfError(err, forkRepoFolder, "cannot create branch: %v", err)
 
 	// fetch the chain data
-	err = node.DumpInfo(claimPath, claimName, rpcAddress, logger)
+	err = node.DumpInfo(forkRepoFolder, claimName, rpcAddress, logger)
 	println("fetching chain data")
-	utils.AbortIfError(err, "error connecting to the node at %s: %v", rpcAddress, err)
+	utils.AbortCleanupIfError(err, forkRepoFolder, fmt.Sprintf("error connecting to the node at %s: %v", rpcAddress, err), err)
 
 	println("starting claiming process for", claimName)
 	// add rule to the codeowner
@@ -139,7 +131,7 @@ func claim(cmd *cobra.Command, args []string) {
 		commitMsg,
 		time.Now(),
 		config.BasicAuth())
-	utils.AbortCleanupIfError(err, "git push error : %v; this usually means in your forked registry remote repo, there is already a branch with the same name", forkRepoFolder, err)
+	utils.AbortCleanupIfError(err, forkRepoFolder, "git push error : %v; perhaps there is already a branch with the same name in the remote repository?", err)
 	println("changes committed with hash", commit)
 
 	// open the github page to submit the PR to mainRepo

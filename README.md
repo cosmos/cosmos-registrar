@@ -23,21 +23,15 @@ git clone https://github.com/cosmos/cosmos-registrar.git
 step 2. build the binary using go
 
 ```sh
-cd cosmos-registrar && make build
+cd cosmos-registrar && make install
 ```
 
-after running the command above you should find the binary at: `./build/registrar`
-
-step 3. install the binary in your execution path (Optional)
-
-```sh
-mv build/registrar /usr/local/bin
-```
+after running the command above you should find the binary at: `$GOPATH/bin`
 
 
-**Binary distribution**
+**Prebuilt Binaries**
 
-TODO
+[Binaries are auto-generated](https://github.com/cosmos/cosmos-registrar/releases) upon each Git tag.
 
 **Removal**
 
@@ -51,7 +45,37 @@ the files and folder to be removed are:
 
 ## Usage
 
-The `registrar` command can be run interactively (recommended when claiming a chain id) or as a non-interactive command (recommended when updating an already-claimed chain id)
+You can run `registrar` for an interactive walkthrough:
+
+```sh
+$ registrar -c private/config.yaml
+D[2021-05-21|16:11:11.056] Using config file at                         config=private/config.yaml
+? what shall we do today? Register a new ChainID
+
+Good choice, following this process you will submit a
+pull request to the chain IDs registry hosted on GitHub:
+
+https://github.com/cosmos/registry
+
+The first step is to create a fork of the registry using this link:
+
+https://github.com/cosmos/registry/fork
+
+? Go ahead and confirm when you have done so Yes
+
+Next enter the rpc url for a node of your network
+eg http://10.0.0.1:26657
+
+? rpc address http://localhost:26657
+checking out branch  localnet
+...
+```
+
+Or non-interactively:
+`registrar claim http://localhost:26657`
+`registrar update` (your PR to claim the chain id must be accepted first)
+
+Usually you will run the claim process interactively and run the update subcommand with a cronjob.
 
 ### Claiming a chain ID (interactive)
 
@@ -59,6 +83,12 @@ The procedure to claim a chain id only requires to run the command `registrar` a
 
 At this point you can follow the instructions that the tool will display and at the end of the
 process you should have successfully submitted a request (PR) to claim your chain id.
+
+### cosmoshub-4 special notes
+The `cosmoshub-4` `genesis.json` is too large to be downloaded from a node's Tendermint RPC (should be fixed with Tendermint 0.35) and too large to be uploaded to a Github repository.
+
+Therefore when you are claiming `cosmoshub-4` ensure that `genesis.cosmoshub-4.json.gz` is in your current directory. It is taken from [cosmos/mainnet](https://github.com/cosmos/mainnet/) and has a md5sum of `a4216a3cae68e9190d0757c90bcb1f1b`.
+
 ### Publish updates
 
 Once the claim has been successful you can run the command:
@@ -67,7 +97,7 @@ Once the claim has been successful you can run the command:
 registrar update
 ```
 
-the command will read your configuration and submit updates to the main registry on your behalf
+the command will read your configuration and submit updates to the main registry on your behalf.
 
 ## Configurations
 
