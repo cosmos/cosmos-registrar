@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"net/url"
 	"path"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	registrar "github.com/jackzampolin/cosmos-registrar/pkg/config"
 	"github.com/jackzampolin/cosmos-registrar/pkg/gitwrap"
 	"github.com/jackzampolin/cosmos-registrar/pkg/node"
 	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
@@ -41,26 +41,11 @@ func update(cmd *cobra.Command, args []string) (err error) {
 	err = gitwrap.PullBranch(repo, config.RegistryRootBranch)
 	utils.AbortIfError(err, "error pulling changes for the %s branch: %v", config.RegistryRootBranch, err)
 
-	// ###  list the entries that the user owns
-	// read the the codeowners file
+	// build a list of the chainIDs that the user owns
 	co, err := codeowners.FromFile(registryFolder)
 	utils.AbortIfError(err, "cannot find the CODEOWNERS file: %v", err)
+	chainIDs := myChains(co, config)
 
-	// TODO: move to config
-	repoPatternRgxp := regexp.MustCompile("[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*")
-	// contains the path/chainIds to collect
-	chainIDs := []string{}
-	for _, p := range co.Patterns {
-		if matched := repoPatternRgxp.MatchString(p.Pattern); !matched {
-			logger.Error("Invalid path [SKIPPED]", "pattern", p)
-			continue
-		}
-		if utils.ContainsStr(&p.Owners, fmt.Sprint("@", config.GitName)) {
-			logger.Info("found match", "pattern", p.Pattern, "git username", config.GitName)
-			// TODO: validate this path before appending it (eg. doesn't contains special chars like ../ and so on)
-			chainIDs = append(chainIDs, strings.Trim(p.Pattern, "/"))
-		}
-	}
 	var wg sync.WaitGroup
 	// this are the actual nodes that we need to update
 	for _, cID := range chainIDs {
@@ -94,5 +79,27 @@ func update(cmd *cobra.Command, args []string) (err error) {
 	}
 	wg.Wait()
 
+	return
+}
+
+// myChains parses CODEOWNERS and returns a list of chainIDs that the
+// config.GitName username owns
+func myChains(co *codeowners.Codeowners, config *registrar.Config) (chainIDs []string) {
+	chainIDs = []string{}
+	if co.Patterns[0].Pattern == "*" && utils.ContainsStr(&co.Patterns[0].Owners, fmt.Sprint("@", config.GitName)) {
+		logger.Info("you own everything", "pattern", co.Patterns[0].Pattern, "git username", config.GitName)
+		for _, p := range co.Patterns[1:] {
+			chainIDs = append(chainIDs, strings.Trim(p.Pattern, "/"))
+		}
+		return
+	} else {
+		for _, p := range co.Patterns {
+			if utils.ContainsStr(&p.Owners, fmt.Sprint("@", config.GitName)) {
+				logger.Info("found match", "pattern", p.Pattern, "git username", config.GitName)
+				// TODO: validate this path before appending it (eg. doesn't contains special chars like ../ and so on)
+				chainIDs = append(chainIDs, strings.Trim(p.Pattern, "/"))
+			}
+		}
+	}
 	return
 }
