@@ -54,12 +54,7 @@ func update(cmd *cobra.Command, args []string) (err error) {
 			defer wg.Done()
 			peers, err := node.LoadPeers(rootFolder, chainID, config.RPCAddr, logger)
 			utils.AbortIfError(err, "failed to load peer info for chain ID %s: %v", chainID, err)
-			// load genesis checksum
-			checksum, err := node.LoadGenesisSum(rootFolder, chainID)
-			if err != nil {
-				logger.Error("permanent error: cannot retrieve the genesis checksum", "repo", rootFolder, "chain ID", chainID)
-				return
-			}
+
 			// contact all peers
 			node.RefreshPeers(peers, checksum, logger)
 			// save the changes
