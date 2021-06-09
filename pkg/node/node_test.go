@@ -27,9 +27,9 @@ func TestCosmoshub4Workaround(t *testing.T) {
 // TestRefreshPeers is more of a dev harness, since it requires a network
 // connection and has no objectively correct result
 func TestRefreshPeers(t *testing.T) {
-	if !*online {
-		t.Skip("skipping test in offline mode")
-	}
+	// if !*online {
+	// 	t.Skip("skipping test in offline mode")
+	// }
 	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
 	sPeer := &Peer{
 		ID:                "12033793a528b55aa40ed9d8354bb5b19520a718",
