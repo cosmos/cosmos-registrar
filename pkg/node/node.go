@@ -125,40 +125,64 @@ func SavePeers(basePath, chainID string, peers map[string]*Peer, logger log.Logg
 	return
 }
 
-func RefreshPeers(peers map[string]*Peer, genesisSum string, logger log.Logger) (err error) {
-	// for each pear available
+func contactPeer(p *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
+	defer wg.Done()
+	client, e := Client(p.Address)
+	ctx := context.Background()
+
+	if e != nil {
+		logger.Error("error creating tendermint client: %s", e)
+		return
+	}
+
+	// TODO: in a more advanced version of this tool,
+	// this would crawl the network a couple of hops
+	// and find more peers
+
+	netInfo, err := client.NetInfo(ctx)
+	if err != nil {
+		return
+	}
+	logger.Debug("GET /net_info", "rpc-addr", p.Address)
+	for _, p := range netInfo.Peers {
+		peer := &Peer{
+			ID:                string(p.NodeInfo.DefaultNodeID),
+			Address:           fmt.Sprintf("http://%s:26657", p.RemoteIP),
+			IsSeed:            false,
+			LastContactHeight: 0,
+			LastContactDate:   time.Time{},
+			UpdatedAt:         time.Now(),
+			Reachable:         false,
+		}
+		// reach out to the peers of the peer and record if they're at
+		// least up
+		ctx2, cancel := context.WithTimeout(ctx, 1*time.Second)
+		defer cancel()
+		peer.Contact(ctx2, logger)
+		if peer.Reachable {
+			np.AddNode(peer)
+		}
+	}
+}
+
+func RefreshPeers(peers map[string]*Peer, logger log.Logger) (err error) {
+	// for each peer available
 	// in the list, contact the known peers
-	// and add them to the list
+	// and add them to the channel
+	np := new(NodePool)
 	wg := sync.WaitGroup{}
 
 	for _, p := range peers {
-		go func(peer *Peer) {
-			defer wg.Done()
-			client, e := Client(p.Address)
-			ctx := context.Background()
-
-			if e != nil {
-				err = fmt.Errorf("error creating tendermint client: %s", err)
-				return
-			}
-			gen, err = client.Genesis(ctx)
-
-			// TODO: in a more advanced version of this tool,
-			// this would crawl the network a couple of hops
-			// and find more peers
-
-			netInfo, err := client.NetInfo(ctx)
-			if err != nil {
-				return
-			}
-			logger.Debug("GET /net_info", "rpc-addr", p.Address)
-			for _, p := range netInfo.Peers {
-				fmt.Println(p)
-			}
-		}(p)
+		go contactPeer(p, np, &wg, logger)
 		wg.Add(1)
 	}
 	wg.Wait()
+
+	// np contains all peers that had a reachable 26657. Simply add them into
+	// the peers map.
+	for _, p := range np.nodes {
+		peers[p.ID] = p
+	}
 	return
 }
 
@@ -284,6 +308,28 @@ type Peer struct {
 	LastContactDate   time.Time `json:"last_contact_date,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 	Reachable         bool      `json:"reachable,omitempty"`
+}
+
+func (p *Peer) Contact(ctx context.Context, logger log.Logger) {
+	client, err := Client(p.Address)
+	if err != nil {
+		p.UpdatedAt = time.Now()
+		p.Reachable = false
+		return
+	}
+
+	res, err := client.Status(ctx)
+	if err != nil {
+		logger.Info("Couldn't contact", "peer", p.Address)
+		p.UpdatedAt = time.Now()
+		p.Reachable = false
+		return
+	}
+	logger.Info("Confirmed reachable", "peer", p.Address)
+	p.LastContactHeight = res.SyncInfo.LatestBlockHeight
+	p.LastContactDate = time.Now()
+	p.UpdatedAt = time.Now()
+	p.Reachable = true
 }
 
 type repoDir struct {
