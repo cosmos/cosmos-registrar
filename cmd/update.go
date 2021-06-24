@@ -56,9 +56,9 @@ func update(cmd *cobra.Command, args []string) (err error) {
 			utils.AbortIfError(err, "failed to load peer info for chain ID %s: %v", chainID, err)
 
 			// contact all peers
-			node.RefreshPeers(peers, logger)
+			peersReachable := node.RefreshPeers(peers, logger)
 			// save the changes
-			node.SavePeers(rootFolder, chainID, peers, logger)
+			node.SavePeers(rootFolder, chainID, peersReachable, logger)
 			// commit and push
 			err = gitwrap.StageToCommit(repo, chainID)
 			utils.AbortIfError(err, "failed to stage updates to repository")

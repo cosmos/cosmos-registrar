@@ -53,7 +53,7 @@ func FromJSON(path string, v interface{}) (err error) {
 
 // ToJSON write data to a json file
 func ToJSON(path string, data interface{}) (err error) {
-	raw, err := json.Marshal(data)
+	raw, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return
 	}

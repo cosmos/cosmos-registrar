@@ -156,20 +156,29 @@ func contactPeer(p *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
 		}
 		// reach out to the peers of the peer and record if they're at
 		// least up
-		ctx2, cancel := context.WithTimeout(ctx, 1*time.Second)
-		defer cancel()
-		peer.Contact(ctx2, logger)
-		if peer.Reachable {
-			np.AddNode(peer)
-		}
+		go up(ctx, peer, np, wg, logger)
+		wg.Add(1)
 	}
 }
 
-func RefreshPeers(peers map[string]*Peer, logger log.Logger) (err error) {
+func up(ctx context.Context, peer *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	defer wg.Done()
+
+	peer.Contact(ctx, logger)
+	if peer.Reachable {
+		np.AddNode(peer.ID, peer)
+	}
+}
+
+// RefreshPeers asks a peer to give its list of peers, then tries to contact
+// them on 26657 to see if they're up.
+func RefreshPeers(peers map[string]*Peer, logger log.Logger) (peersReachable map[string]*Peer) {
 	// for each peer available
 	// in the list, contact the known peers
 	// and add them to the channel
-	np := new(NodePool)
+	np := NewNodePool()
 	wg := sync.WaitGroup{}
 
 	for _, p := range peers {
@@ -179,10 +188,8 @@ func RefreshPeers(peers map[string]*Peer, logger log.Logger) (err error) {
 	wg.Wait()
 
 	// np contains all peers that had a reachable 26657. Simply add them into
-	// the peers map.
-	for _, p := range np.nodes {
-		peers[p.ID] = p
-	}
+	// the answer.
+	peersReachable = np.nodes
 	return
 }
 
@@ -480,20 +487,4 @@ func cosmoshub4Workaround(ctx context.Context, client *rpchttp.HTTP) (gen *ctype
 	}
 	gen = &ctypes.ResultGenesis{Genesis: gDoc}
 	return
-}
-
-// LightRoot is the format for a light client root file which
-// will be used for state sync
-type LightRoot struct {
-	TrustHeight int64  `json:"trust-height"`
-	TrustHash   string `json:"trust-hash"`
-}
-
-// NewLightRoot returns a new light root
-func NewLightRoot(sh tmtypes.SignedHeader) []byte {
-	out, _ := json.MarshalIndent(&LightRoot{
-		TrustHeight: sh.Header.Height,
-		TrustHash:   sh.Commit.BlockID.Hash.String(),
-	}, "", "  ")
-	return out
 }
