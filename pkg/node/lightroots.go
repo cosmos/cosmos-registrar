@@ -21,3 +21,5 @@ func NewLightRoot(sh tmtypes.SignedHeader) []byte {
 	}, "", "  ")
 	return out
 }
+
+type LightRootHistory []byte

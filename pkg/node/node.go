@@ -264,10 +264,11 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 		return
 	}
 	// TODO: sanity checks on the genesis file returned from the chain compared with repo
-	eg.Go(updateFileGo(repoRoot.latestPath(), NewLightRoot(commit.SignedHeader), logger))
-	eg.Go(updateFileGo(repoRoot.heightPath(commit.SignedHeader.Header.Height), NewLightRoot(commit.SignedHeader), logger))
+	eg.Go(updateFileGo(repoRoot.heights(), LightRootHistory(NewLightRoot(commit.SignedHeader)), logger))
+
 	// TODO: not sure about this one, but we should be able to get the node version from the rpc
 	// eg.Go(updateFileGo(repoRoot.binariesPath(), config.Binary(), logger))
+
 	eg.Go(func() error {
 		if _, err = os.Stat(repoRoot.genesisPath()); os.IsNotExist(err) {
 			sum, write, err := sortedGenesis(gen.Genesis)
