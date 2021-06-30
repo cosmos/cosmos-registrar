@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -99,5 +100,12 @@ func TestUpdateLightRoots(t *testing.T) {
 	}
 	pm := map[string]*Peer{peer1.ID: peer1, peer2.ID: peer2, peer3.ID: peer3}
 	_, err := UpdateLightRoots("cosmoshub-4", pm, logger)
+	assert.Nil(t, err)
+}
+
+func TestParseLightRootHistory(t *testing.T) {
+	testJSON := []byte(`[{"trust-height":6766717,"trust-hash":"2DD62FE8D0358822D245C8C4AD91489DC0031CF35BE193CC561868DB79A51904"},{"trust-height":6766806,"trust-hash":"C21AFE7C2AB4927497DD239568FB9F819120D70EAF254E970185F88502806F1E"},{"trust-height":6766886,"trust-hash":"A6B573B433D69ABC6F07216B572E21BE8DCF83CD037E8898B379F6978D3085DE"}]`)
+	r := bytes.NewReader(testJSON)
+	_, err := parseLightRootHistory(r)
 	assert.Nil(t, err)
 }

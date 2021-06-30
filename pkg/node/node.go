@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -126,11 +127,16 @@ func SavePeers(basePath, chainID string, peers map[string]*Peer, logger log.Logg
 
 func SaveLightRoots(basePath, chainID string, lr *LightRoot, logger log.Logger) (err error) {
 	repoRoot := repoDir{basePath, chainID}
-	lrh := LightRootHistory{}
-	err = utils.FromJSON(repoRoot.heights(), &lrh)
+	f, err := os.Open(repoRoot.heights())
 	if err != nil {
 		return
 	}
+	r := bufio.NewReader(f)
+	lrh, err := parseLightRootHistory(r)
+	if err != nil {
+		return
+	}
+
 	lrh = append(lrh, *lr)
 	err = utils.ToJSON(repoRoot.heights(), lrh)
 	return
@@ -599,12 +605,12 @@ func cosmoshub4Workaround(ctx context.Context, client *rpchttp.HTTP) (gen *ctype
 	return
 }
 
-func parseLightRootHistory(r io.Reader) (lrh *LightRootHistory, err error) {
+func parseLightRootHistory(r io.Reader) (lrh LightRootHistory, err error) {
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
 		return
 	}
-	lrh = new(LightRootHistory)
-	json.Unmarshal(b, lrh)
+	lrh = LightRootHistory{}
+	err = json.Unmarshal(b, &lrh)
 	return
 }
