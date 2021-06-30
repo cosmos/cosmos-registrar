@@ -25,7 +25,6 @@ import (
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
 	"github.com/tendermint/tendermint/types"
-	tmtypes "github.com/tendermint/tendermint/types"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -127,7 +126,13 @@ func SavePeers(basePath, chainID string, peers map[string]*Peer, logger log.Logg
 
 func SaveLightRoots(basePath, chainID string, lr *LightRoot, logger log.Logger) (err error) {
 	repoRoot := repoDir{basePath, chainID}
-	err = utils.ToJSON(repoRoot.heights(), lr)
+	lrh := LightRootHistory{}
+	err = utils.FromJSON(repoRoot.heights(), &lrh)
+	if err != nil {
+		return
+	}
+	lrh = append(lrh, *lr)
+	err = utils.ToJSON(repoRoot.heights(), lrh)
 	return
 }
 
@@ -199,20 +204,41 @@ func RefreshPeers(peers map[string]*Peer, logger log.Logger) (peersReachable map
 	return
 }
 
-// mustHaveLatestBlockHeight retries GET /status until the node reports a correct latest block height
-func mustHaveLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
-	client, e := Client(peer.Address)
+// getLatestBlockHeight retries GET /status until the node reports a correct latest block height
+func getLatestBlockHeight(peers map[string]*Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
+	// Transform map into list of peers
+	vs := []*Peer{}
+	for _, v := range peers {
+		vs = append(vs, v)
+	}
+
+	for i := 0; i < len(vs); i++ {
+		latestBlockHeight, err = mustGetLatestBlockHeight(vs[i], chainID, logger)
+		if err == nil {
+			return latestBlockHeight, err
+		} else {
+			logger.Debug("Peer could not tell us the latest block height", "peer", vs[i].Address)
+		}
+	}
+	return 0, fmt.Errorf("update light roots: no peer could tell us the latest block height")
+}
+
+func mustGetLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
 	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	client, e := Client(peer.Address)
 	if e != nil {
 		logger.Error("error creating tendermint client: %s", e)
 	}
 
 	for {
-		logger.Info("GET /status to get latest block height", "peer", peer.Address)
+		logger.Debug("GET /status to get latest block height", "peer", peer.Address)
 		stat, err := client.Status(ctx)
 		switch {
 		case err != nil:
-			logger.Error("error fetching client status: %s", err)
+			logger.Error("error fetching client status: %s", "error", err)
 			return 0, err
 		case stat.NodeInfo.Network != chainID:
 			logger.Error("node(%s) is on chain(%s) not configured chain(%s)", peer.Address, stat.NodeInfo.Network, chainID)
@@ -230,16 +256,11 @@ func mustHaveLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (l
 // answer, it returns an error
 func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger) (lr *LightRoot, err error) {
 	// Choose a random peer to provide the latest block height
-	var val *Peer
-	for _, v := range peers {
-		val = v
-		break
-	}
-	h, err := mustHaveLatestBlockHeight(val, chainID, logger)
+	h, err := getLatestBlockHeight(peers, chainID, logger)
 	if err != nil {
-		logger.Error("Couldn't get latest block height", "peer", val.Address)
+		logger.Error("Couldn't get latest block height to update light root history", err)
+		return nil, err
 	}
-	logger.Info("Chose arbitrary peer to provide latest block height", "peer", val.Address, "height", h)
 
 	wg := sync.WaitGroup{}
 	nlr := NewLightRootResults()
@@ -254,7 +275,7 @@ func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger)
 			if e != nil {
 				logger.Error("error creating tendermint client: %s", e)
 			}
-			logger.Info("Asking peer for commit at", "peer", peer.Address, "height", h)
+			logger.Debug("Asking peer for commit at", "peer", peer.Address, "height", h)
 			commit, err = client.Commit(ctx, &h)
 			if err != nil {
 				logger.Error("error getting light roots from", "peer", peer.Address, "error", err)
@@ -262,7 +283,7 @@ func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger)
 			}
 			lr := NewLightRoot(commit.SignedHeader)
 			lrr.AddResult(peer.ID, lr)
-			logger.Info("Updated light roots from", "peer", peer.Address, "peerID", peer.ID, "lightroot", lr)
+			logger.Debug("Updated light roots from", "peer", peer.Address, "peerID", peer.ID, "lightroot", lr)
 		}(peer, nlr, logger)
 		wg.Add(1)
 	}
@@ -418,12 +439,11 @@ func (p *Peer) Contact(ctx context.Context, logger log.Logger) {
 
 	res, err := client.Status(ctx)
 	if err != nil {
-		logger.Info("Couldn't contact", "peer", p.Address)
 		p.UpdatedAt = time.Now()
 		p.Reachable = false
 		return
 	}
-	logger.Info("Confirmed reachable", "peer", p.Address)
+	logger.Debug("Confirmed reachable", "peer", p.Address)
 	p.LastContactHeight = res.SyncInfo.LatestBlockHeight
 	p.LastContactDate = time.Now()
 	p.UpdatedAt = time.Now()
@@ -490,7 +510,7 @@ func createDirIfNotExist(pth string, log log.Logger) (err error) {
 	return nil
 }
 
-func sortedGenesis(gen *tmtypes.GenesisDoc) (sum string, indented []byte, err error) {
+func sortedGenesis(gen *types.GenesisDoc) (sum string, indented []byte, err error) {
 	// prepare to sort
 	if indented, err = json.Marshal(gen); err != nil {
 		return

@@ -22,7 +22,7 @@ func NewLightRoot(sh tmtypes.SignedHeader) *LightRoot {
 	}
 }
 
-type LightRootHistory []*LightRoot
+type LightRootHistory = []LightRoot
 
 type result struct {
 	PeerID    string
