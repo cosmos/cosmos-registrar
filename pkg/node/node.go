@@ -193,6 +193,76 @@ func RefreshPeers(peers map[string]*Peer, logger log.Logger) (peersReachable map
 	return
 }
 
+// mustHaveLatestBlockHeight retries GET /status until the node reports a correct latest block height
+func mustHaveLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
+	client, e := Client(peer.Address)
+	ctx := context.Background()
+	if e != nil {
+		logger.Error("error creating tendermint client: %s", e)
+	}
+
+	for {
+		stat, err := client.Status(ctx)
+		switch {
+		case err != nil:
+			logger.Error("error fetching client status: %s", err)
+			return 0, err
+		case stat.NodeInfo.Network != chainID:
+			logger.Error("node(%s) is on chain(%s) not configured chain(%s)", peer.Address, stat.NodeInfo.Network, chainID)
+			return 0, err
+		}
+		if !stat.SyncInfo.CatchingUp {
+			return stat.SyncInfo.LatestBlockHeight, err
+		}
+		time.Sleep(time.Duration(200) * time.Millisecond)
+	}
+}
+
+// UpdateLightRoots asks a set a reachable peers for the blockhash at a
+// specific height, and ensures they all agree. If it cannot find a majority
+// answer, it returns an error
+func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger) (lr *LightRoot, err error) {
+	// Choose a random peer to provide the latest block height
+	var val *Peer
+	for _, v := range peers {
+		val = v
+		break
+	}
+	h, err := mustHaveLatestBlockHeight(val, chainID, logger)
+	if err != nil {
+		logger.Error("Couldn't get latest block height", "peer", val.Address)
+	}
+	logger.Info("Chose arbitrary peer to provide latest block height", "peer", val.Address, "height", h)
+
+	wg := sync.WaitGroup{}
+	nlr := NewLightRootResults()
+	for _, peer := range peers {
+		go func(peer *Peer, nlr *LightRootResults, logger log.Logger) {
+			defer wg.Done()
+			logger.Info("Updating light roots from", "peer", peer.Address)
+			client, e := Client(peer.Address)
+			ctx := context.Background()
+			if e != nil {
+				logger.Error("error creating tendermint client: %s", e)
+			}
+			commit, err = client.Commit(ctx, &h)
+			if err != nil {
+				logger.Error("error getting light roots from", "peer", peer.Address, "error", err)
+			}
+			nlr.AddResult(peer.ID, NewLightRoot(commit.SignedHeader))
+		}(peer, nlr, logger)
+		wg.Add(1)
+	}
+	wg.Wait()
+
+	if !nlr.Same() {
+		return nil, fmt.Errorf("peers reported different lightroot hashes for height %v", h)
+	}
+
+	// Return a random LightRootResult (they're all the same at this point)
+	return nlr.RandomElement(), nil
+}
+
 // DumpInfo connect to ad node and dumps the info about
 // that chain into a folder
 func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err error) {
@@ -263,8 +333,15 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 	if err = createDirIfNotExist(repoRoot.lrpath(), logger); err != nil {
 		return
 	}
-	// TODO: sanity checks on the genesis file returned from the chain compared with repo
-	eg.Go(updateFileGo(repoRoot.heights(), LightRootHistory(NewLightRoot(commit.SignedHeader)), logger))
+
+	// Initialize a list of historical LightRoots
+	lrh := make([]*LightRoot, 1)
+	lrh[0] = NewLightRoot(commit.SignedHeader)
+	lrhBytes, err := json.MarshalIndent(lrh, "", "  ")
+	if err != nil {
+		return err
+	}
+	eg.Go(updateFileGo(repoRoot.heights(), lrhBytes, logger))
 
 	// TODO: not sure about this one, but we should be able to get the node version from the rpc
 	// eg.Go(updateFileGo(repoRoot.binariesPath(), config.Binary(), logger))
@@ -345,12 +422,11 @@ type repoDir struct {
 	chainID string
 }
 
-func (r repoDir) chainPath() string         { return path.Join(r.dir, r.chainID) }
-func (r repoDir) genesisPath() string       { return path.Join(r.chainPath(), "genesis.json") }
-func (r repoDir) genesisSumPath() string    { return path.Join(r.chainPath(), "genesis.json.sum") }
-func (r repoDir) lrpath() string            { return path.Join(r.chainPath(), "light-roots") }
-func (r repoDir) latestPath() string        { return path.Join(r.lrpath(), "latest.json") }
-func (r repoDir) heightPath(h int64) string { return path.Join(r.lrpath(), fmt.Sprintf("%d.json", h)) }
+func (r repoDir) chainPath() string      { return path.Join(r.dir, r.chainID) }
+func (r repoDir) genesisPath() string    { return path.Join(r.chainPath(), "genesis.json") }
+func (r repoDir) genesisSumPath() string { return path.Join(r.chainPath(), "genesis.json.sum") }
+func (r repoDir) lrpath() string         { return path.Join(r.chainPath(), "light-roots") }
+func (r repoDir) heights() string        { return path.Join(r.lrpath(), "heights.json") }
 
 func (r repoDir) peersPath() string { return path.Join(r.chainPath(), "peers.json") }
 
@@ -487,5 +563,15 @@ func cosmoshub4Workaround(ctx context.Context, client *rpchttp.HTTP) (gen *ctype
 		return
 	}
 	gen = &ctypes.ResultGenesis{Genesis: gDoc}
+	return
+}
+
+func parseLightRootHistory(r io.Reader) (lrh *LightRootHistory, err error) {
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return
+	}
+	lrh = new(LightRootHistory)
+	json.Unmarshal(b, lrh)
 	return
 }

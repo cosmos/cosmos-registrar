@@ -55,9 +55,13 @@ func update(cmd *cobra.Command, args []string) (err error) {
 			peers, err := node.LoadPeers(rootFolder, chainID, config.RPCAddr, logger)
 			utils.AbortIfError(err, "failed to load peer info for chain ID %s: %v", chainID, err)
 
-			// contact all peers
+			// contact all peers, ask them for peers and check if those are up
 			peersReachable := node.RefreshPeers(peers, logger)
-			// save the changes
+			// ask reachable peers about light root hashes
+			lr, err := node.UpdateLightRoots(chainID, peersReachable, logger)
+			utils.AbortIfError(err, "failed to update lightroots for chain ID %s: %v", chainID, err)
+			// save the updated lightroot history
+			// save the updated peerlist
 			node.SavePeers(rootFolder, chainID, peersReachable, logger)
 			// commit and push
 			err = gitwrap.StageToCommit(repo, chainID)

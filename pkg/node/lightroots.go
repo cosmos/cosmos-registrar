@@ -1,7 +1,7 @@
 package node
 
 import (
-	"encoding/json"
+	"sync"
 
 	tmtypes "github.com/tendermint/tendermint/types"
 )
@@ -14,12 +14,70 @@ type LightRoot struct {
 }
 
 // NewLightRoot returns a new light root
-func NewLightRoot(sh tmtypes.SignedHeader) []byte {
-	out, _ := json.MarshalIndent(&LightRoot{
+func NewLightRoot(sh tmtypes.SignedHeader) *LightRoot {
+	return &LightRoot{
 		TrustHeight: sh.Header.Height,
 		TrustHash:   sh.Commit.BlockID.Hash.String(),
-	}, "", "  ")
-	return out
+	}
 }
 
-type LightRootHistory []byte
+type LightRootHistory []*LightRoot
+
+type result struct {
+	PeerID    string
+	LightRoot *LightRoot
+}
+
+// LightRootResults is a map with a Mutex wrapped around it so that only one goroutine
+// can write to it at any one time. goroutines created by RefreshPeers() write
+// their final results here.
+type LightRootResults struct {
+	rw         sync.RWMutex
+	lightroots map[string]*LightRoot
+}
+
+// Size returns the size of the pool.
+func (h *LightRootResults) Size() int {
+	h.rw.RLock()
+	defer h.rw.RUnlock()
+	return len(h.lightroots)
+}
+
+func (h *LightRootResults) AddResult(peerID string, lr *LightRoot) {
+	h.rw.Lock()
+	defer h.rw.Unlock()
+	h.lightroots[peerID] = lr
+}
+
+func (h *LightRootResults) RandomElement() *LightRoot {
+	h.rw.Lock()
+	defer h.rw.Unlock()
+	for _, v := range h.lightroots {
+		return v
+	}
+}
+
+func (h *LightRootResults) Same() bool {
+	h.rw.RLock()
+	defer h.rw.RUnlock()
+
+	// transform values into a list of results
+	r := make([]result, h.Size())
+	for peerID, lr := range h.lightroots {
+		r = append(r, result{peerID, lr})
+	}
+
+	// compare the LightRoots in the list
+	for i := 1; i < len(r); i++ {
+		if r[i].LightRoot != r[0].LightRoot {
+			return false
+		}
+	}
+	return true
+}
+
+func NewLightRootResults() *LightRootResults {
+	n := new(LightRootResults)
+	n.lightroots = make(map[string]*LightRoot)
+	return n
+}
