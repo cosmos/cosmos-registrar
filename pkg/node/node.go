@@ -125,6 +125,12 @@ func SavePeers(basePath, chainID string, peers map[string]*Peer, logger log.Logg
 	return
 }
 
+func SaveLightRoots(basePath, chainID string, lr *LightRoot, logger log.Logger) (err error) {
+	repoRoot := repoDir{basePath, chainID}
+	err = utils.ToJSON(repoRoot.heights(), lr)
+	return
+}
+
 func contactPeer(p *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
 	defer wg.Done()
 	client, e := Client(p.Address)
@@ -202,6 +208,7 @@ func mustHaveLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (l
 	}
 
 	for {
+		logger.Info("GET /status to get latest block height", "peer", peer.Address)
 		stat, err := client.Status(ctx)
 		switch {
 		case err != nil:
@@ -237,26 +244,32 @@ func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger)
 	wg := sync.WaitGroup{}
 	nlr := NewLightRootResults()
 	for _, peer := range peers {
-		go func(peer *Peer, nlr *LightRootResults, logger log.Logger) {
+		go func(peer *Peer, lrr *LightRootResults, logger log.Logger) {
 			defer wg.Done()
-			logger.Info("Updating light roots from", "peer", peer.Address)
-			client, e := Client(peer.Address)
 			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+			defer cancel()
+
+			client, e := Client(peer.Address)
 			if e != nil {
 				logger.Error("error creating tendermint client: %s", e)
 			}
+			logger.Info("Asking peer for commit at", "peer", peer.Address, "height", h)
 			commit, err = client.Commit(ctx, &h)
 			if err != nil {
 				logger.Error("error getting light roots from", "peer", peer.Address, "error", err)
+				return
 			}
-			nlr.AddResult(peer.ID, NewLightRoot(commit.SignedHeader))
+			lr := NewLightRoot(commit.SignedHeader)
+			lrr.AddResult(peer.ID, lr)
+			logger.Info("Updated light roots from", "peer", peer.Address, "peerID", peer.ID, "lightroot", lr)
 		}(peer, nlr, logger)
 		wg.Add(1)
 	}
 	wg.Wait()
 
 	if !nlr.Same() {
-		return nil, fmt.Errorf("peers reported different lightroot hashes for height %v", h)
+		return nil, fmt.Errorf("peers reported different lightroot hashes for height %v, peerMap: %v", h, nlr)
 	}
 
 	// Return a random LightRootResult (they're all the same at this point)

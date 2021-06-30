@@ -61,6 +61,8 @@ func update(cmd *cobra.Command, args []string) (err error) {
 			lr, err := node.UpdateLightRoots(chainID, peersReachable, logger)
 			utils.AbortIfError(err, "failed to update lightroots for chain ID %s: %v", chainID, err)
 			// save the updated lightroot history
+			err = node.SaveLightRoots(rootFolder, chainID, lr, logger)
+			utils.AbortIfError(err, "failed to save updated lightroots for chain ID %s: %v", chainID, err)
 			// save the updated peerlist
 			node.SavePeers(rootFolder, chainID, peersReachable, logger)
 			// commit and push

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"reflect"
 	"sync"
 
 	tmtypes "github.com/tendermint/tendermint/types"
@@ -52,9 +53,11 @@ func (h *LightRootResults) AddResult(peerID string, lr *LightRoot) {
 func (h *LightRootResults) RandomElement() *LightRoot {
 	h.rw.Lock()
 	defer h.rw.Unlock()
+	var val *LightRoot
 	for _, v := range h.lightroots {
-		return v
+		val = v
 	}
+	return val
 }
 
 func (h *LightRootResults) Same() bool {
@@ -62,14 +65,14 @@ func (h *LightRootResults) Same() bool {
 	defer h.rw.RUnlock()
 
 	// transform values into a list of results
-	r := make([]result, h.Size())
+	r := []result{}
 	for peerID, lr := range h.lightroots {
 		r = append(r, result{peerID, lr})
 	}
 
 	// compare the LightRoots in the list
 	for i := 1; i < len(r); i++ {
-		if r[i].LightRoot != r[0].LightRoot {
+		if !reflect.DeepEqual(r[i].LightRoot, r[0].LightRoot) {
 			return false
 		}
 	}

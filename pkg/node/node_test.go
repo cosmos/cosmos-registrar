@@ -98,5 +98,6 @@ func TestUpdateLightRoots(t *testing.T) {
 		Reachable:         true,
 	}
 	pm := map[string]*Peer{peer1.ID: peer1, peer2.ID: peer2, peer3.ID: peer3}
-	UpdateLightRoots("cosmoshub-4", pm, logger)
+	_, err := UpdateLightRoots("cosmoshub-4", pm, logger)
+	assert.Nil(t, err)
 }
