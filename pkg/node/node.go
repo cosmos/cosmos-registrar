@@ -221,10 +221,9 @@ func getLatestBlockHeight(peers map[string]*Peer, chainID string, logger log.Log
 	for i := 0; i < len(vs); i++ {
 		latestBlockHeight, err = mustGetLatestBlockHeight(vs[i], chainID, logger)
 		if err == nil {
-			return latestBlockHeight, err
-		} else {
-			logger.Debug("Peer could not tell us the latest block height", "peer", vs[i].Address)
+			return latestBlockHeight, nil
 		}
+		logger.Debug("Peer could not tell us the latest block height", "peer", vs[i].Address)
 	}
 	return 0, fmt.Errorf("update light roots: no peer could tell us the latest block height")
 }
@@ -234,9 +233,9 @@ func mustGetLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (la
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	client, e := Client(peer.Address)
-	if e != nil {
-		logger.Error("error creating tendermint client: %s", e)
+	client, err := Client(peer.Address)
+	if err != nil {
+		logger.Error("error creating tendermint client: %s", err)
 	}
 
 	for {
@@ -251,7 +250,7 @@ func mustGetLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (la
 			return 0, err
 		}
 		if !stat.SyncInfo.CatchingUp {
-			return stat.SyncInfo.LatestBlockHeight, err
+			return stat.SyncInfo.LatestBlockHeight, nil
 		}
 		time.Sleep(time.Duration(200) * time.Millisecond)
 	}
@@ -271,6 +270,7 @@ func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger)
 	wg := sync.WaitGroup{}
 	nlr := NewLightRootResults()
 	for _, peer := range peers {
+		wg.Add(1)
 		go func(peer *Peer, lrr *LightRootResults, logger log.Logger) {
 			defer wg.Done()
 			ctx := context.Background()
@@ -291,7 +291,6 @@ func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger)
 			lrr.AddResult(peer.ID, lr)
 			logger.Debug("Updated light roots from", "peer", peer.Address, "peerID", peer.ID, "lightroot", lr)
 		}(peer, nlr, logger)
-		wg.Add(1)
 	}
 	wg.Wait()
 
