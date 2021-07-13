@@ -210,7 +210,9 @@ func RefreshPeers(peers map[string]*Peer, logger log.Logger) (peersReachable map
 	return
 }
 
-// getLatestBlockHeight retries GET /status until the node reports a correct latest block height
+// getLatestBlockHeight cycles through the list of peers, calling
+// mustGeTLatestBlockHeight and only proceeding to the next peer if there is a
+// network error
 func getLatestBlockHeight(peers map[string]*Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
 	// Transform map into list of peers
 	vs := []*Peer{}
@@ -228,9 +230,13 @@ func getLatestBlockHeight(peers map[string]*Peer, chainID string, logger log.Log
 	return 0, fmt.Errorf("update light roots: no peer could tell us the latest block height")
 }
 
+// mustGetLatestBlockHeight retries GET /status until the node reports a correct latest block height
 func mustGetLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
+	retryCount := 5
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 	defer cancel()
 
 	client, err := Client(peer.Address)
@@ -238,22 +244,27 @@ func mustGetLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (la
 		logger.Error("error creating tendermint client: %s", err)
 	}
 
-	for {
+	// If the node is catching up, retry up to retryCount times. Otherwise, if
+	// the connection fails because of network error, or node has different
+	// chainID, return error immediately.
+	for n := 0; n <= retryCount; n++ {
+		<-ticker.C
 		logger.Debug("GET /status to get latest block height", "peer", peer.Address)
 		stat, err := client.Status(ctx)
 		switch {
 		case err != nil:
-			logger.Error("error fetching client status: %s", "error", err)
+			logger.Error("error fetching client status", "error", err)
 			return 0, err
 		case stat.NodeInfo.Network != chainID:
 			logger.Error("node(%s) is on chain(%s) not configured chain(%s)", peer.Address, stat.NodeInfo.Network, chainID)
 			return 0, err
 		}
 		if !stat.SyncInfo.CatchingUp {
-			return stat.SyncInfo.LatestBlockHeight, nil
+			latestBlockHeight = stat.SyncInfo.LatestBlockHeight
+			break
 		}
-		time.Sleep(time.Duration(200) * time.Millisecond)
 	}
+	return latestBlockHeight, nil
 }
 
 // UpdateLightRoots asks a set a reachable peers for the blockhash at a
