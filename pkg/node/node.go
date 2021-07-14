@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -25,7 +26,6 @@ import (
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	libclient "github.com/tendermint/tendermint/rpc/jsonrpc/client"
 	"github.com/tendermint/tendermint/types"
-	tmtypes "github.com/tendermint/tendermint/types"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -125,6 +125,23 @@ func SavePeers(basePath, chainID string, peers map[string]*Peer, logger log.Logg
 	return
 }
 
+func SaveLightRoots(basePath, chainID string, lr *LightRoot, logger log.Logger) (err error) {
+	repoRoot := repoDir{basePath, chainID}
+	f, err := os.Open(repoRoot.heights())
+	if err != nil {
+		return
+	}
+	r := bufio.NewReader(f)
+	lrh, err := parseLightRootHistory(r)
+	if err != nil {
+		return
+	}
+
+	lrh = append(lrh, *lr)
+	err = utils.ToJSON(repoRoot.heights(), lrh)
+	return
+}
+
 func contactPeer(p *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
 	defer wg.Done()
 	client, e := Client(p.Address)
@@ -156,20 +173,29 @@ func contactPeer(p *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
 		}
 		// reach out to the peers of the peer and record if they're at
 		// least up
-		ctx2, cancel := context.WithTimeout(ctx, 1*time.Second)
-		defer cancel()
-		peer.Contact(ctx2, logger)
-		if peer.Reachable {
-			np.AddNode(peer)
-		}
+		go up(ctx, peer, np, wg, logger)
+		wg.Add(1)
 	}
 }
 
-func RefreshPeers(peers map[string]*Peer, logger log.Logger) (err error) {
+func up(ctx context.Context, peer *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	defer wg.Done()
+
+	peer.Contact(ctx, logger)
+	if peer.Reachable {
+		np.AddNode(peer.ID, peer)
+	}
+}
+
+// RefreshPeers asks a peer to give its list of peers, then tries to contact
+// them on 26657 to see if they're up.
+func RefreshPeers(peers map[string]*Peer, logger log.Logger) (peersReachable map[string]*Peer) {
 	// for each peer available
 	// in the list, contact the known peers
 	// and add them to the channel
-	np := new(NodePool)
+	np := NewNodePool()
 	wg := sync.WaitGroup{}
 
 	for _, p := range peers {
@@ -179,11 +205,112 @@ func RefreshPeers(peers map[string]*Peer, logger log.Logger) (err error) {
 	wg.Wait()
 
 	// np contains all peers that had a reachable 26657. Simply add them into
-	// the peers map.
-	for _, p := range np.nodes {
-		peers[p.ID] = p
-	}
+	// the answer.
+	peersReachable = np.nodes
 	return
+}
+
+// getLatestBlockHeight cycles through the list of peers, calling
+// mustGeTLatestBlockHeight and only proceeding to the next peer if there is a
+// network error
+func getLatestBlockHeight(peers map[string]*Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
+	// Transform map into list of peers
+	vs := []*Peer{}
+	for _, v := range peers {
+		vs = append(vs, v)
+	}
+
+	for i := 0; i < len(vs); i++ {
+		latestBlockHeight, err = mustGetLatestBlockHeight(vs[i], chainID, logger)
+		if err == nil {
+			return latestBlockHeight, nil
+		}
+		logger.Debug("Peer could not tell us the latest block height", "peer", vs[i].Address)
+	}
+	return 0, fmt.Errorf("update light roots: no peer could tell us the latest block height")
+}
+
+// mustGetLatestBlockHeight retries GET /status until the node reports a correct latest block height
+func mustGetLatestBlockHeight(peer *Peer, chainID string, logger log.Logger) (latestBlockHeight int64, err error) {
+	retryCount := 5
+	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	defer cancel()
+
+	client, err := Client(peer.Address)
+	if err != nil {
+		logger.Error("error creating tendermint client: %s", err)
+	}
+
+	// If the node is catching up, retry up to retryCount times. Otherwise, if
+	// the connection fails because of network error, or node has different
+	// chainID, return error immediately.
+	for n := 0; n <= retryCount; n++ {
+		<-ticker.C
+		logger.Debug("GET /status to get latest block height", "peer", peer.Address)
+		stat, err := client.Status(ctx)
+		switch {
+		case err != nil:
+			logger.Error("error fetching client status", "error", err)
+			return 0, err
+		case stat.NodeInfo.Network != chainID:
+			logger.Error("node(%s) is on chain(%s) not configured chain(%s)", peer.Address, stat.NodeInfo.Network, chainID)
+			return 0, err
+		}
+		if !stat.SyncInfo.CatchingUp {
+			latestBlockHeight = stat.SyncInfo.LatestBlockHeight
+			break
+		}
+	}
+	return latestBlockHeight, nil
+}
+
+// UpdateLightRoots asks a set a reachable peers for the blockhash at a
+// specific height, and ensures they all agree. If it cannot find a majority
+// answer, it returns an error
+func UpdateLightRoots(chainID string, peers map[string]*Peer, logger log.Logger) (lr *LightRoot, err error) {
+	// Choose a random peer to provide the latest block height
+	h, err := getLatestBlockHeight(peers, chainID, logger)
+	if err != nil {
+		logger.Error("Couldn't get latest block height to update light root history", err)
+		return nil, err
+	}
+
+	wg := sync.WaitGroup{}
+	nlr := NewLightRootResults()
+	for _, peer := range peers {
+		wg.Add(1)
+		go func(peer *Peer, lrr *LightRootResults, logger log.Logger) {
+			defer wg.Done()
+			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+			defer cancel()
+
+			client, e := Client(peer.Address)
+			if e != nil {
+				logger.Error("error creating tendermint client: %s", e)
+			}
+			logger.Debug("Asking peer for commit at", "peer", peer.Address, "height", h)
+			commit, err = client.Commit(ctx, &h)
+			if err != nil {
+				logger.Error("error getting light roots from", "peer", peer.Address, "error", err)
+				return
+			}
+			lr := NewLightRoot(commit.SignedHeader)
+			lrr.AddResult(peer.ID, lr)
+			logger.Debug("Updated light roots from", "peer", peer.Address, "peerID", peer.ID, "lightroot", lr)
+		}(peer, nlr, logger)
+	}
+	wg.Wait()
+
+	if !nlr.Same() {
+		return nil, fmt.Errorf("peers reported different lightroot hashes for height %v, peerMap: %v", h, nlr)
+	}
+
+	// Return a random LightRootResult (they're all the same at this point)
+	return nlr.RandomElement(), nil
 }
 
 // DumpInfo connect to ad node and dumps the info about
@@ -256,11 +383,19 @@ func DumpInfo(basePath, chainID, rpcAddress string, logger log.Logger) (err erro
 	if err = createDirIfNotExist(repoRoot.lrpath(), logger); err != nil {
 		return
 	}
-	// TODO: sanity checks on the genesis file returned from the chain compared with repo
-	eg.Go(updateFileGo(repoRoot.latestPath(), NewLightRoot(commit.SignedHeader), logger))
-	eg.Go(updateFileGo(repoRoot.heightPath(commit.SignedHeader.Header.Height), NewLightRoot(commit.SignedHeader), logger))
+
+	// Initialize a list of historical LightRoots
+	lrh := make([]*LightRoot, 1)
+	lrh[0] = NewLightRoot(commit.SignedHeader)
+	lrhBytes, err := json.MarshalIndent(lrh, "", "  ")
+	if err != nil {
+		return err
+	}
+	eg.Go(updateFileGo(repoRoot.heights(), lrhBytes, logger))
+
 	// TODO: not sure about this one, but we should be able to get the node version from the rpc
 	// eg.Go(updateFileGo(repoRoot.binariesPath(), config.Binary(), logger))
+
 	eg.Go(func() error {
 		if _, err = os.Stat(repoRoot.genesisPath()); os.IsNotExist(err) {
 			sum, write, err := sortedGenesis(gen.Genesis)
@@ -320,12 +455,11 @@ func (p *Peer) Contact(ctx context.Context, logger log.Logger) {
 
 	res, err := client.Status(ctx)
 	if err != nil {
-		logger.Info("Couldn't contact", "peer", p.Address)
 		p.UpdatedAt = time.Now()
 		p.Reachable = false
 		return
 	}
-	logger.Info("Confirmed reachable", "peer", p.Address)
+	logger.Debug("Confirmed reachable", "peer", p.Address)
 	p.LastContactHeight = res.SyncInfo.LatestBlockHeight
 	p.LastContactDate = time.Now()
 	p.UpdatedAt = time.Now()
@@ -337,12 +471,11 @@ type repoDir struct {
 	chainID string
 }
 
-func (r repoDir) chainPath() string         { return path.Join(r.dir, r.chainID) }
-func (r repoDir) genesisPath() string       { return path.Join(r.chainPath(), "genesis.json") }
-func (r repoDir) genesisSumPath() string    { return path.Join(r.chainPath(), "genesis.json.sum") }
-func (r repoDir) lrpath() string            { return path.Join(r.chainPath(), "light-roots") }
-func (r repoDir) latestPath() string        { return path.Join(r.lrpath(), "latest.json") }
-func (r repoDir) heightPath(h int64) string { return path.Join(r.lrpath(), fmt.Sprintf("%d.json", h)) }
+func (r repoDir) chainPath() string      { return path.Join(r.dir, r.chainID) }
+func (r repoDir) genesisPath() string    { return path.Join(r.chainPath(), "genesis.json") }
+func (r repoDir) genesisSumPath() string { return path.Join(r.chainPath(), "genesis.json.sum") }
+func (r repoDir) lrpath() string         { return path.Join(r.chainPath(), "light-roots") }
+func (r repoDir) heights() string        { return path.Join(r.lrpath(), "heights.json") }
 
 func (r repoDir) peersPath() string { return path.Join(r.chainPath(), "peers.json") }
 
@@ -393,7 +526,7 @@ func createDirIfNotExist(pth string, log log.Logger) (err error) {
 	return nil
 }
 
-func sortedGenesis(gen *tmtypes.GenesisDoc) (sum string, indented []byte, err error) {
+func sortedGenesis(gen *types.GenesisDoc) (sum string, indented []byte, err error) {
 	// prepare to sort
 	if indented, err = json.Marshal(gen); err != nil {
 		return
@@ -482,18 +615,12 @@ func cosmoshub4Workaround(ctx context.Context, client *rpchttp.HTTP) (gen *ctype
 	return
 }
 
-// LightRoot is the format for a light client root file which
-// will be used for state sync
-type LightRoot struct {
-	TrustHeight int64  `json:"trust-height"`
-	TrustHash   string `json:"trust-hash"`
-}
-
-// NewLightRoot returns a new light root
-func NewLightRoot(sh tmtypes.SignedHeader) []byte {
-	out, _ := json.MarshalIndent(&LightRoot{
-		TrustHeight: sh.Header.Height,
-		TrustHash:   sh.Commit.BlockID.Hash.String(),
-	}, "", "  ")
-	return out
+func parseLightRootHistory(r io.Reader) (lrh LightRootHistory, err error) {
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return
+	}
+	lrh = LightRootHistory{}
+	err = json.Unmarshal(b, &lrh)
+	return
 }

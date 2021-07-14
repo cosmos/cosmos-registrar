@@ -7,7 +7,13 @@ import "sync"
 // their final results here.
 type NodePool struct {
 	rw    sync.RWMutex
-	nodes []*Peer
+	nodes map[string]*Peer
+}
+
+func NewNodePool() *NodePool {
+	n := new(NodePool)
+	n.nodes = make(map[string]*Peer)
+	return n
 }
 
 // Size returns the size of the pool.
@@ -17,8 +23,8 @@ func (np *NodePool) Size() int {
 	return len(np.nodes)
 }
 
-func (np *NodePool) AddNode(p *Peer) {
+func (np *NodePool) AddNode(peerID string, p *Peer) {
 	np.rw.Lock()
 	defer np.rw.Unlock()
-	np.nodes = append(np.nodes, p)
+	np.nodes[peerID] = p
 }
