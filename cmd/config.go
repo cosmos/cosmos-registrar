@@ -27,7 +27,7 @@ func init() {
 	// viper.SetDefault("build-version", "v2.0.13")
 
 	viper.SetDefault("github-access-token", "get yours at https://github.com/settings/tokens")
-	viper.SetDefault("registry-root", "https://github.com/apeunit/registry")
+	viper.SetDefault("registry-root", "https://github.com/cosmos/registry")
 	viper.SetDefault("registry-fork-name", "registry")
 	viper.SetDefault("registry-root-branch", "main")
 	viper.SetDefault("git-name", "Your name goes here")
