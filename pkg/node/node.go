@@ -161,6 +161,11 @@ func contactPeer(p *Peer, np *NodePool, wg *sync.WaitGroup, logger log.Logger) {
 		return
 	}
 	logger.Debug("GET /net_info", "rpc-addr", p.Address)
+
+	// The peer responded, so we know it's up and can add it to the reachable list.
+	np.AddNode(p.ID, p)
+
+	// Now we consider the peers that this peer reported
 	for _, p := range netInfo.Peers {
 		peer := &Peer{
 			ID:                string(p.NodeInfo.DefaultNodeID),

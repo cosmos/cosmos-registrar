@@ -124,12 +124,8 @@ func StageToCommit(repo *git.Repository, path ...string) (err error) {
 	return
 }
 
-// CommitAndPush - shortcut for commit and push
-// name, email, date are for the user creating the commit singnature
-// message is the commit message
-// auth is for authentication to the remote for the pull
-func CommitAndPush(repo *git.Repository, name, email, message string, date time.Time, auth *http.BasicAuth) (hash string, err error) {
-
+// Commit forms a commit from already staged files
+func Commit(repo *git.Repository, name, email, message string, date time.Time) (hash string, err error) {
 	wt, err := repo.Worktree()
 	if err != nil {
 		return
@@ -147,8 +143,15 @@ func CommitAndPush(repo *git.Repository, name, email, message string, date time.
 		return
 	}
 	hash = commit.String()
+	return hash, nil
+}
 
-	// now try to push
+func Push(repo *git.Repository, auth *http.BasicAuth) (err error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return
+	}
+
 	for retries := 0; retries < 10; retries++ {
 		// pull first
 		err = wt.Pull(&git.PullOptions{RemoteName: "origin"})
@@ -166,5 +169,19 @@ func CommitAndPush(repo *git.Repository, name, email, message string, date time.
 		}
 	}
 
+	return
+}
+
+// CommitAndPush - shortcut for commit and push
+// name, email, date are for the user creating the commit singnature
+// message is the commit message
+// auth is for authentication to the remote for the pull
+func CommitAndPush(repo *git.Repository, name, email, message string, date time.Time, auth *http.BasicAuth) (hash string, err error) {
+	hash, err = Commit(repo, name, email, message, date)
+	if err != nil {
+		return
+	}
+
+	err = Push(repo, auth)
 	return
 }
