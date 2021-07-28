@@ -17,6 +17,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type updates struct {
+	lr    *node.LightRoot
+	peers map[string]*node.Peer
+}
+
 // updateCmd represents the update command
 var updateCmd = &cobra.Command{
 	Use:   "update",
@@ -29,6 +34,8 @@ func update(cmd *cobra.Command, args []string) (err error) {
 	var (
 		repo           *git.Repository
 		registryFolder = path.Join(config.Workspace, "registry-root")
+		mu             sync.Mutex
+		updatedInfo    = make(map[string]*updates)
 	)
 
 	// open/clone and pull changes from the root repo
@@ -46,14 +53,19 @@ func update(cmd *cobra.Command, args []string) (err error) {
 	utils.AbortIfError(err, "cannot find the CODEOWNERS file: %v", err)
 	chainIDs := myChains(co, config)
 
+	// update is meant to be called mostly by a CODEOWNER who owns the entire
+	// repo. So one machine will contact all the chainIDs and push all the
+	// updates. Contacting the chainIDs are done asynchronously
 	var wg sync.WaitGroup
-	// this are the actual nodes that we need to update
 	for _, cID := range chainIDs {
 		wg.Add(1)
 		go func(rootFolder, chainID string) {
 			defer wg.Done()
 			peers, err := node.LoadPeers(rootFolder, chainID, config.RPCAddr, logger)
-			utils.AbortIfError(err, "failed to load peer info for chain ID %s: %v", chainID, err)
+			if err != nil {
+				logger.Error("failed to load peer info", "chainID", chainID, "err", err)
+				return
+			}
 
 			// contact all peers, ask them for peers and check if those are up
 			peersReachable := node.RefreshPeers(peers, logger)
@@ -63,34 +75,49 @@ func update(cmd *cobra.Command, args []string) (err error) {
 				logger.Error("failed to update lightroots", "chainID", chainID, "err", err)
 				return
 			}
-			// utils.AbortIfError(err, "failed to update lightroots for chain ID %s: %v", chainID, err)
-			// save the updated lightroot history
-			err = node.SaveLightRoots(rootFolder, chainID, lr, logger)
-			if err != nil {
-				logger.Error("failed to save updated lightroots", "chainID", chainID, "err", err)
-				return
+
+			u := &updates{
+				lr:    lr,
+				peers: peersReachable,
 			}
-			// save the updated peerlist
-			node.SavePeers(rootFolder, chainID, peersReachable, logger)
-			// commit and push
-			err = gitwrap.StageToCommit(repo, chainID)
-			if err != nil {
-				logger.Error("failed to stage updates to repository", "err", err)
-				return
-			}
-			hash, err := gitwrap.CommitAndPush(repo,
-				config.GitName,
-				config.GitEmail,
-				fmt.Sprintf("updates for chain id %s", chainID),
-				time.Now(),
-				config.BasicAuth(),
-			)
-			utils.AbortIfError(err, "failed to update registry, please manually rollback the repo changes and try again")
-			logger.Info("chain ID update committed", "chainID", chainID, "commitHash", hash)
+			mu.Lock()
+			updatedInfo[chainID] = u
+			mu.Unlock()
 		}(registryFolder, cID)
 	}
 	wg.Wait()
 
+	// saving and committing the info is done synchronously.
+	for chainID, u := range updatedInfo {
+		// save the updated lightroot history
+		err = node.SaveLightRoots(registryFolder, chainID, u.lr, logger)
+		if err != nil {
+			logger.Error("failed to save updated lightroots", "chainID", chainID, "err", err)
+			return
+		}
+		// save the updated peerlist
+		node.SavePeers(registryFolder, chainID, u.peers, logger)
+		// commit and push
+		err = gitwrap.StageToCommit(repo, chainID)
+		if err != nil {
+			logger.Error("failed to stage updates to repository", "chainID", chainID, "err", err)
+			return
+		}
+
+		hash, err := gitwrap.Commit(repo,
+			config.GitName,
+			config.GitEmail,
+			fmt.Sprintf("updates for chain id %s", chainID),
+			time.Now(),
+		)
+		if err != nil {
+			logger.Error("failed to commit updates to repository", "chainID", chainID, "err", err)
+		} else {
+			logger.Info("chain ID update committed", "chainID", chainID, "commitHash", hash)
+		}
+	}
+	err = gitwrap.Push(repo, config.BasicAuth())
+	utils.AbortIfError(err, "failed to update registry, please manually rollback the repo changes and try again")
 	return
 }
 
