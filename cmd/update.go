@@ -59,15 +59,25 @@ func update(cmd *cobra.Command, args []string) (err error) {
 			peersReachable := node.RefreshPeers(peers, logger)
 			// ask reachable peers about light root hashes
 			lr, err := node.UpdateLightRoots(chainID, peersReachable, logger)
-			utils.AbortIfError(err, "failed to update lightroots for chain ID %s: %v", chainID, err)
+			if err != nil {
+				logger.Error("failed to update lightroots", "chainID", chainID, "err", err)
+				return
+			}
+			// utils.AbortIfError(err, "failed to update lightroots for chain ID %s: %v", chainID, err)
 			// save the updated lightroot history
 			err = node.SaveLightRoots(rootFolder, chainID, lr, logger)
-			utils.AbortIfError(err, "failed to save updated lightroots for chain ID %s: %v", chainID, err)
+			if err != nil {
+				logger.Error("failed to save updated lightroots", "chainID", chainID, "err", err)
+				return
+			}
 			// save the updated peerlist
 			node.SavePeers(rootFolder, chainID, peersReachable, logger)
 			// commit and push
 			err = gitwrap.StageToCommit(repo, chainID)
-			utils.AbortIfError(err, "failed to stage updates to repository")
+			if err != nil {
+				logger.Error("failed to stage updates to repository", "err", err)
+				return
+			}
 			hash, err := gitwrap.CommitAndPush(repo,
 				config.GitName,
 				config.GitEmail,
