@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jackzampolin/cosmos-registrar/pkg/utils"
+	tmjson "github.com/tendermint/tendermint/libs/json"
 	"github.com/tendermint/tendermint/libs/log"
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
@@ -533,18 +534,18 @@ func createDirIfNotExist(pth string, log log.Logger) (err error) {
 
 func sortedGenesis(gen *types.GenesisDoc) (sum string, indented []byte, err error) {
 	// prepare to sort
-	if indented, err = json.Marshal(gen); err != nil {
+	if indented, err = tmjson.Marshal(gen); err != nil {
 		return
 	}
 
 	// sort
-	var c interface{}
-	if err = json.Unmarshal(indented, &c); err != nil {
+	c, err := types.GenesisDocFromJSON(indented)
+	if err != nil {
 		return
 	}
 
 	// indent
-	if indented, err = json.MarshalIndent(c, "", "  "); err != nil {
+	if indented, err = tmjson.MarshalIndent(c, "", "  "); err != nil {
 		return
 	}
 
