@@ -1,3 +1,5 @@
+> # **ARCHIVED**: Work on this repo has moved to https://github.com/cosmos/chain-registry
+
 # Cosmos Registrar
 
 The cosmos registrar project is a command line client that allows to claim a chain ID in the [cosmos chain id registry](https://github.com/cosmos/registry) and to publish updates about the status of the nodes for the claimed chain id.
